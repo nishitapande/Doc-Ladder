@@ -1,0 +1,132 @@
+.top-margin{
+    margin-top:90px;
+}
+
+.margin-x{
+    margin-left: 15px;
+}
+.link{
+    text-decoration: none;
+}
+
+.file-upload{
+    text-align: center;
+    border: 3px dashed rgb(210,227,244);
+    position: relative;
+    cursor: pointer;
+    width: 100%;
+    box-sizing: border-box;
+}
+.file-upload p{
+    margin-top:10px;
+    color: #bbcada;
+    font-size:  0.87rem;
+}
+
+.file-upload input{
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+@media(max-width:600px){
+    .file-upload{
+        padding: 1rem;
+        border-width: 2px;
+        max-width: 90%;
+    }
+    .file-upload p{
+        font-size: 0.75rem;
+    }
+}
+
+
+.search-container{
+    width: 490px;
+    display: block;
+    margin: 0 auto;
+}
+input#search-bar{
+    margin: 0 auto;
+    width: 100%;
+    height: 45px;
+    padding: 0 20px;
+    font-size: 1rem;
+    border: 1px solid #d0cfce;
+    outline: none;
+    &:focus{
+        border: 1px solid #008ABF;
+        trasition:0.35s ease;
+        color: #008ABF;
+        &::-moz-placeholder{
+            transition: opacity 0.45s ease;
+            opacity: 0;
+        }
+        &:-ms-placeholder{
+            transition: opacity 0.45s ease;
+            opacity: 0;
+        }
+    }
+}
+
+.search-icon{
+    position: relative;
+    float: right;
+    width: 75px;
+    height: 75px;
+    top: -62px;
+    right: -45px;
+}
+
+.tabs-container{
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 20px 0;
+}
+
+.tabs-wrapper{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 15px;
+    padding: 10px;
+    background-color: #fff;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.tabs-list{
+    display: flex;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+
+.tabs-item{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 120px;
+    height: 40px;
+    margin: 0 8px;
+    cursor: pointer;
+    transition: background-color 0.3s, color 0.3s, box-shadow 0.3s;
+    font-size: 14px;
+    text-align: center;
+    line-height: 1.5;
+}
+
+.tabs-item.active{
+    background-color: #007bfF;
+    color: #fff;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+.tabs-item:hover{
+    background-color: #f0f0f0;
+}
