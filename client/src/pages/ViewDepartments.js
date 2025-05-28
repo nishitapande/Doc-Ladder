@@ -46,7 +46,12 @@ const ViewDepartments = () => {
         );
         if (confirmDelete) {
           try {
-            await axios.delete(`${baseURL}/departments/${row.DEPARTMENT_ID}`);
+            await axios.delete(
+              `${baseURL}/departments/deletedepartment/${row.DEPARTMENT_ID}`,
+              {
+                credentials: "include",
+              }
+            );
             alert("Department deleted successfully");
             refreshData();
           } catch (error) {

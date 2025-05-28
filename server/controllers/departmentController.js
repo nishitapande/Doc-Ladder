@@ -68,7 +68,7 @@ exports.addDepartment = async (req, res, next) => {
 //DELETE A DEPARTMENT
 
 exports.deleteDepartment = async (req, res, next) => {
-  const { id } = req.params.id;
+  const id  = parseInt(req.params.id);
   try {
     const pool = await sql.connect();
     const result = await pool
