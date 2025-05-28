@@ -60,10 +60,13 @@ const DocumentsToSignPage = () => {
 
   const handleOpenManagerDialog = (row) => {
     console.log("Row data:", row); // Log the entire row data
-    if (row && typeof row === 'object') {
+    if (row && typeof row === "object") {
       console.log("SIGNATURES_REQUIRED:", row.SIGNATURES_REQUIRED);
       console.log("MANAGER_ID:", row.MANAGER_ID);
-      if (row.SIGNATURES_REQUIRED !== undefined && row.MANAGER_ID !== undefined) {
+      if (
+        row.SIGNATURES_REQUIRED !== undefined &&
+        row.MANAGER_ID !== undefined
+      ) {
         setSelectedRow(row);
         setManagerDialogOpen(true);
         setSignaturesRequired(row.SIGNATURES_REQUIRED);

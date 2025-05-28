@@ -99,7 +99,7 @@ router.delete(
   authMiddleware.protect,
   fileController.authenticateUser,
   fileController.connectToDatabase,
-  fileController.declinedFilesPerUser
+  fileController.deleteFileByUser
 );
 
 //DECLINE A FILE
@@ -150,6 +150,16 @@ router.post(
   fileController.authenticateUser,
   fileController.connectToDatabase,
   fileController.sendFileTo
+);
+
+//GET SENT FILES PER USER
+router.get(
+  "/getSentFiles",
+  corsMiddleware,
+  authMiddleware.protect,
+  fileController.authenticateUser,
+  fileController.connectToDatabase,
+  fileController.getSentFiles
 );
 
 module.exports = router;

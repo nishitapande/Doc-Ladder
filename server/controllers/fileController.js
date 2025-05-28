@@ -47,20 +47,22 @@ exports.getAllUnsignedFilePerUser = async (req, res, next) => {
   try {
     const pool = await sql.connect();
     const getFilesQuery = `SELECT 
-    s.FILE_ID,
-    f.FILE_NAME, 
-    e.FIRST_NAME + ' ' + e.LAST_NAME AS NAME,
-    v.SIGNATURES_REQUIRED,
-    f.SIGNATURES_DONE,
-    f.CREATED_ON,
-    v.VOUCHER_NAME,
-    f.REMARKS 
-    FROM tblSignatureLog s
-    INNER JOIN tblFile f ON s.FILE_ID = f.FILE_ID
-    INNER JOIN tblVoucherType v ON f.VOUCHER_ID = v.VOUCHER_ID
-    INNER JOIN tblEmployee e ON f.CREATED_BY = e.EMPLOYEE_ID
-    WHERE s.EMPLOYEE_ID = @EMPLOYEE_ID AND s.STATUS = 0
-    ORDER BY f.CREATED_ON DESC`;
+  s.FILE_ID,
+  f.FILE_NAME, 
+  e.FIRST_NAME + ' ' + e.LAST_NAME AS NAME,
+  v.SIGNATURES_REQUIRED,
+  f.SIGNATURES_DONE,
+  f.CREATED_ON,
+  v.VOUCHER_NAME,
+  f.REMARKS,
+  emp.MANAGER_ID
+FROM tblSignatureLog s
+INNER JOIN tblFile f ON s.FILE_ID = f.FILE_ID
+INNER JOIN tblVoucherType v ON f.VOUCHER_ID = v.VOUCHER_ID
+INNER JOIN tblEmployee e ON f.CREATED_BY = e.EMPLOYEE_ID
+INNER JOIN tblEmployee emp ON s.EMPLOYEE_ID = emp.EMPLOYEE_ID
+WHERE s.EMPLOYEE_ID = @EMPLOYEE_ID AND s.STATUS = 0
+ORDER BY f.CREATED_ON DESC`;
 
     const result = await pool
       .request()
@@ -112,7 +114,9 @@ exports.getAllFilesCreatedByUser = async (req, res, next) => {
 exports.deleteFileByUser = async (req, res, next) => {
   const { employeeId, pool } = req;
   const { fileId } = req.params;
-
+  console.log("fileid: ", fileId);
+  console.log("params:", req.params);
+  const id = parseInt(fileId);
   try {
     const getCreatedBy = `SELECT CREATED_BY FROM tblFile WHERE FILE_ID = @FILE_ID`;
 
@@ -197,7 +201,7 @@ exports.insertFileWithoutSignature = async (req, res, next) => {
   const { fileName, departmentId, remarks, fileUploadValue, voucherId } =
     req.body;
   const { file, pool, employeeId } = req;
-  console.log("fileuploadvalue: ", fileUploadValue);
+  // console.log("fileuploadvalue: ", fileUploadValue);
 
   if (fileUploadValue === 1) {
     console.log(fileUploadValue === 1 ? true : false);
@@ -338,7 +342,7 @@ exports.insertFileWithSignature = async (req, res, next) => {
       .request()
       .input("FILE_ID", sql.Int, fileId)
       .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .input("TIME_STAMP", sql.Date, new Date())
+      .input("TIME_STAMP", sql.DateTime, new Date())
       .input("STATUS", sql.Int, 1)
       .query(insertIntoSignatureLogQuery);
 
@@ -370,7 +374,6 @@ exports.forwardForApproval = async (req, res, next) => {
 
       return res.status(200).json({ message: "File approved for approval" });
     }
-    console.log("here 1");
     if (fileUploadValue == 3) {
       //insert into signature log
       console.log("here reached");
@@ -382,8 +385,6 @@ exports.forwardForApproval = async (req, res, next) => {
         .input("EMPLOYEE_ID", sql.Int, sendFileTo)
         .input("STATUS", sql.Int, 0)
         .query(insertIntoSignatureLogQuery);
-
-      console.log("hereee");
 
       return res.status(200).json({ message: "File forwarded for approval" });
     }
@@ -570,7 +571,7 @@ exports.declineFile = async (req, res, next) => {
     `;
     const declineResult = await pool
       .request()
-      .input("TIME_STAMP", sql.Date, new Date())
+      .input("TIME_STAMP", sql.DateTime, new Date())
       .input("REMARKS", sql.NVarChar, remarks)
       .input("FILE_ID", sql.Int, fileId)
       .input("EMPLOYEE_ID", sql.Int, employeeId)
@@ -604,7 +605,7 @@ exports.approvedFilesPerUser = async (req, res, next) => {
       .request()
       .input("EMPLOYEE_ID", sql.Int, employeeId)
       .query(searchQuery);
-    res.status(200).json(result.recordset);
+    res.status(200).json(result);
   } catch (error) {
     console.log("error in fetching approved files: ", error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -881,6 +882,81 @@ exports.sendingFile = async (req, res, next) => {
     return res.status(200).json({ message: "File sent to " + sendTo });
   } catch (error) {
     console.log("error in sending file to: ", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.getSentFiles = async (req, res, next) => {
+  const { employeeId, pool } = req;
+  try {
+    const query = `
+      DECLARE @UserAId INT = @EMPLOYEE_ID;
+
+ 
+WITH UserAFiles AS (
+    SELECT FILE_ID, TIME_STAMP AS A_TIMESTAMP
+    FROM tblSignatureLog
+    WHERE EMPLOYEE_ID = @UserAId AND STATUS = 1
+),
+LaterUsers AS (
+    SELECT 
+        s.FILE_ID,
+        s.EMPLOYEE_ID,
+        s.TIME_STAMP,
+        u.A_TIMESTAMP,
+        ROW_NUMBER() OVER (
+            PARTITION BY s.FILE_ID
+            ORDER BY 
+                CASE WHEN s.TIME_STAMP IS NULL THEN 1 ELSE 0 END,  -- NULLs come last
+                s.TIME_STAMP
+        ) AS rn
+    FROM tblSignatureLog s
+    JOIN UserAFiles u
+        ON s.FILE_ID = u.FILE_ID
+    WHERE 
+        s.EMPLOYEE_ID <> @UserAId
+        AND (
+            s.TIME_STAMP > u.A_TIMESTAMP OR s.TIME_STAMP IS NULL
+        )
+),
+NextUserPerFile AS (
+    SELECT * 
+    FROM LaterUsers
+    WHERE rn = 1
+)
+SELECT 
+    nupf.FILE_ID,
+    f.FILE_NAME,
+    nupf.EMPLOYEE_ID,
+    e.FIRST_NAME + ' ' + e.LAST_NAME AS EMPLOYEE_NAME,
+    nupf.TIME_STAMP AS NextUserTime,
+    s.STATUS AS NextUserStatus,
+    CASE 
+        WHEN s.STATUS = 0 THEN 'In Progress'
+        WHEN s.STATUS = 1 THEN 'Approved'
+        WHEN s.STATUS = 2 THEN 'Declined'
+        ELSE 'Unknown'
+    END AS NextUserStatusText
+FROM NextUserPerFile nupf
+JOIN tblFile f ON nupf.FILE_ID = f.FILE_ID
+JOIN tblEmployee e ON nupf.EMPLOYEE_ID = e.EMPLOYEE_ID
+JOIN tblSignatureLog s 
+    ON s.FILE_ID = nupf.FILE_ID 
+    AND s.EMPLOYEE_ID = nupf.EMPLOYEE_ID
+    AND (
+        (s.TIME_STAMP = nupf.TIME_STAMP) 
+        OR (s.TIME_STAMP IS NULL AND nupf.TIME_STAMP IS NULL)
+    );
+    `;
+
+    const result = await pool
+      .request()
+      .input("EMPLOYEE_ID", sql.Int, employeeId)
+      .query(query);
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Error in fetching next user signatures: ", error);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 };

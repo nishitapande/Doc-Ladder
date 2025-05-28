@@ -34,7 +34,7 @@ function App() {
             path="/reset-password/:resetToken"
             element={<ResetPassword />}
           />
-          <Route path="/" element={<HomePage />} />
+          <Route path="/" element={<ViewFilePage />} />
           <Route path="/allfiles" element={<ViewFilePage />} />
           <Route path="/upload" element={<UploadFilePage />} />
           <Route path="/documentlist/:id" element={<DocumentListPage />} />

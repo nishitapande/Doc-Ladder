@@ -5,6 +5,7 @@ import SavedFiles from "../components/SavedFiles";
 // import ViewFileCreatedByUserPage from "../components/ViewFileCreatedByUserPage";
 import ApprovedFiles from "../components/ApprovedFiles";
 import DeclinedFiles from "../components/DeclinedFiles";
+import ViewFileSentByUser from "../components/ViewFileSentByUser";
 
 const UserFilePage = () => {
   const { isAuthenticated } = useContext(AuthContext);
@@ -21,8 +22,8 @@ const UserFilePage = () => {
     switch (activeComponent) {
       case "Saved Files":
         return <SavedFiles />;
-      // case "Send":
-      //   return <ViewFileCreatedByUserPage />;
+      case "Send":
+        return <ViewFileSentByUser />;
       case "Approved":
         return <ApprovedFiles />;
       case "Declined":
