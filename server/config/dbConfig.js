@@ -1,7 +1,7 @@
 const sql = require("mssql");
 
 const sqlConfig = {
-  user: process.env.Uid,
+  user: process.env.uid,
   password: process.env.pwd,
   server: process.env.Server,
   port: 1433,
