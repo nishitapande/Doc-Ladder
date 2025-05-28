@@ -27,8 +27,11 @@ const CreateDepartment = () => {
   useEffect(() => {
     const getManagers = async () => {
       try {
-        const response = await fetch(`${baseURL}/users/employeesname`);
-        setManagers(response.data.recordsets[0]);
+        const response = await fetch(`${baseURL}/users/employeesname`, {
+          credentials: "include",
+        });
+        const data = await response.json();
+        setManagers(data.recordsets[0]);
       } catch (error) {
         console.log("Failed to get managers", error.message);
       }
@@ -65,7 +68,7 @@ const CreateDepartment = () => {
         `${baseURL}/departments/adddepartment`,
         {
           departmentName,
-          hodId,
+          HOD_ID: hodId,
         },
         {
           withCredentials: true,

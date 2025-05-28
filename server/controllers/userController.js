@@ -27,7 +27,7 @@ exports.getAllUsers = async (req, res, next) => {
     const result = await pool
       .request()
       .query(
-        `SELECT EMPLOYEE_ID, FIRST_NAME + ' ' +LAST_NAME AS NAME FROM tblEmployee`
+        `SELECT EMPLOYEE_ID, ISNULL(FIRST_NAME, '') + ' ' + ISNULL(LAST_NAME, '') AS NAME FROM tblEmployee`
       );
     res.status(200).json(result);
   } catch (error) {
