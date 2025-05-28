@@ -56,7 +56,9 @@ const SignUpPage = () => {
 
   const fetchManagers = async () => {
     try {
-      const response = await axios.get(`${baseURL}/users/employeenames`);
+      const response = await axios.get(`${baseURL}/users/employeesname`, {
+        credentials: "include",
+      });
       setManagers(response.data.recordsets[0]);
     } catch (error) {
       console.error("Error fetching managers:", error);
@@ -371,7 +373,11 @@ const SignUpPage = () => {
               value={viewableDepartments || []}
               onChange={(e) => {
                 const { value } = e.target;
-                setViewableDepartments(typeof value === 'string' ? value.split(',').map(Number) : value);
+                setViewableDepartments(
+                  typeof value === "string"
+                    ? value.split(",").map(Number)
+                    : value
+                );
               }}
               label="Department"
               error={!!errors.departmentId}
