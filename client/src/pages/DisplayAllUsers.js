@@ -27,11 +27,11 @@ const DisplayAllUsers = () => {
   const navigate = useNavigate();
 
   const actions = [
-    {
-      label: "Edit",
-      color: "Green",
-      handler: (row) => navigate("/"),
-    },
+    // {
+    //   label: "Edit",
+    //   color: "Green",
+    //   handler: (row) => navigate("/"),
+    // },
     {
       label: "Delete",
       color: "Red",
@@ -63,7 +63,7 @@ const DisplayAllUsers = () => {
   const conditionalActions = (row) => {
     const availableActions = [];
 
-    availableActions.push("Edit");
+    // availableActions.push("Edit");
     availableActions.push("Delete");
 
     return availableActions;
