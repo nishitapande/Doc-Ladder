@@ -77,7 +77,6 @@
   border: none;
   color: #666;
   cursor: pointer;
-  font-size: 14px;
   padding: 4px 8px;
 }
 
@@ -93,7 +92,6 @@
 .forgot-password a {
   color: #666;
   text-decoration: none;
-  font-size: 14px;
 }
 
 .forgot-password a:hover {
