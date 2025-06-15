@@ -2,17 +2,9 @@ import axios from "axios";
 import React, { useContext, useState } from "react";
 import { useNavigate, Link as RouterLink } from "react-router-dom";
 import { baseURL } from "../baseURL";
-import {
-  Box,
-  Alert,
-  Button,
-  Stack,
-  TextField,
-  Typography,
-  Link,
-} from "@mui/material";
-import CheckIcon from "@mui/icons-material/Check";
 import AuthContext from "../Context";
+import "../assets/css/LoginPage.css";
+import logo from "../assets/images/doc-ladder-logo.png";
 
 const LoginPage = () => {
   const { checkToken } = useContext(AuthContext);
@@ -21,6 +13,7 @@ const LoginPage = () => {
   const [password, setPassword] = useState("");
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const validateForm = () => {
     if (!email || !password) {
@@ -50,11 +43,11 @@ const LoginPage = () => {
       setSuccess(true);
       setError(null);
       navigate("/");
-
     } catch (error) {
-      if (error.response) {
+      console.log("error: ", error.response.data.error);
+      if (error.response.data.error) {
         setError(
-          error.response.data.message ||
+          error.response.data.error ||
             "An error occurred. Please try again later"
         );
       } else if (error.request) {
@@ -68,63 +61,76 @@ const LoginPage = () => {
   };
 
   return (
-    <Box
-      component="form"
-      sx={{
-        "& > :not (style)": { m: 1, width: "40ch" },
-      }}
-      onSubmit={handleSubmit}
-      noValidate
-      autoComplete="off"
-      display="flex"
-      justifyContent="center"
-      alignItems="center"
-      minHeight="100vh"
-    >
-      <Stack spacing={2}>
-        <Typography variant="h3" gutterBottom align="center">
-          Login
-        </Typography>
-        {success && (
-          <Alert severity="success" icon={<CheckIcon fontSize="inherit" />}>
-            Login successful. Redirecting...
-          </Alert>
-        )}
-        {error && <Alert severity="error">{error}</Alert>}
-        <TextField
-          label="Email"
-          variant="outlined"
-          type="email"
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          value={email}
-        />
-        <TextField
-          value={password}
-          label="Password"
-          type="password"
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+    <div className="login-page">
+      <div className="login-container">
+        <div className="login-form">
+          <div className="login-form-logo">
+            <img src={logo} alt="Doc Ladder Logo" className="logo-image" />
+          </div>
+          <div className="login-form-inputs">
+            {success && (
+              <div className="success-message">
+                Login successful. Redirecting...
+              </div>
+            )}
+            {error && <div className="error-message">{error}</div>}
 
-        <Typography variant="body2" align="left">
-          <Link
-            to="/forgot-password"
-            color="inherit"
-            component={RouterLink}
-            sx={{
-              TextDecoration: "none",
-            }}
-          >
-            Forgot password?
-          </Link>
-        </Typography>
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label htmlFor="email">Email</label>
+                <input
+                  type="email"
+                  id="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  placeholder="Enter your email"
+                />
+              </div>
 
-        <Button type="submit" variant="contained" color="primary" fullWidth>
-          Login
-        </Button>
-      </Stack>
-    </Box>
+              <div className="form-group">
+                <label htmlFor="password">Password</label>
+                <div className="password-input-container">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    id="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    placeholder="Enter your password"
+                  />
+                  <button
+                    type="button"
+                    className="toggle-password"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="forgot-password">
+                <RouterLink to="/forgot-password">Forgot password?</RouterLink>
+              </div>
+
+              <button type="submit" className="login-button">
+                Login
+              </button>
+            </form>
+          </div>
+        </div>
+        <div className="login-image-panel">
+          <div className="login-gradient-bg"></div>
+          <div className="login-gradient-overlay"></div>
+          <div className="login-welcome-content">
+            <span className="welcome-small">WELCOME TO</span>
+            <h1 className="welcome-title">Doc Ladder</h1>
+            <div className="welcome-divider"></div>
+            <span className="welcome-desc">Login to Access Dashboard</span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 

@@ -103,13 +103,13 @@ exports.loginUser = async (req, res, next) => {
         `SELECT EMPLOYEE_ID, EMAIL, PASSWORD FROM tblEmployee WHERE EMAIL = @EMAIL`
       );
     if (!result.recordset || result.recordset.length === 0) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ error: "Invalid email or password" });
     }
     const user = result.recordset[0];
     // console.log(user);
     const match = await bcrypt.compare(password, user.PASSWORD);
     if (!match) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ error: "Invalid email or password" });
     }
     const token = jwt.sign({ id: user.EMPLOYEE_ID }, process.env.JWT_SECRET, {
       expiresIn: "7d",
