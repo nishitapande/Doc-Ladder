@@ -1,0 +1,248 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -------------------------------------------------------------
+// ENUMS
+// -------------------------------------------------------------
+enum UserRole {
+  ORG_ADMIN
+  HOD
+  EMPLOYEE
+}
+
+enum SignatureStatus {
+  WAITING
+  PENDING
+  SIGNED
+  REJECTED
+  DELEGATED
+}
+
+enum FileStatus {
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+}
+
+// -------------------------------------------------------------
+// 1. TENANCY ROOT
+// -------------------------------------------------------------
+model Organization {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String    @map("name")
+  slug        String    @unique @map("slug")
+  databaseUrl String?   @map("database_url")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  employees                Employee[]
+  departments              Department[]
+  employeeDepartmentAccess EmployeeDepartmentAccess[]
+  vouchers                 VoucherType[]
+  files                    File[]
+  digitalSignatures        DigitalSignature[]
+  signatureLogs            SignatureLog[]
+
+  @@map("tbl_organizations")
+}
+
+// -------------------------------------------------------------
+// 2. EMPLOYEES / USERS
+// -------------------------------------------------------------
+model Employee {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  firstName      String    @map("first_name")
+  middleName     String?   @map("middle_name")
+  lastName       String    @map("last_name")
+  email          String    @unique @map("email")
+  passwordHash   String    @map("password_hash")
+  gender         String?   @map("gender")
+  address        String?   @map("address")
+  designation    String?   @map("designation")
+  role           UserRole  @default(EMPLOYEE) @map("role")
+
+  departmentId String? @map("department_id") @db.Uuid
+  managerId    String? @map("manager_id") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  organization        Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department          Department?                @relation("DepartmentMembers", fields: [departmentId], references: [id], onDelete: SetNull)
+  manager             Employee?                  @relation("ManagerSubordinates", fields: [managerId], references: [id], onDelete: SetNull)
+  subordinates        Employee[]                 @relation("ManagerSubordinates")
+  headedDepartments   Department[]               @relation("DepartmentHOD")
+  additionalAccess    EmployeeDepartmentAccess[]
+  digitalSignature    DigitalSignature?
+  createdFiles        File[]                     @relation("FileCreator")
+  assignedSignatures  SignatureLog[]             @relation("AssignedSigner")
+  delegatedSignatures SignatureLog[]             @relation("OriginalSigner")
+
+  @@index([organizationId])
+  @@index([organizationId, departmentId])
+  @@index([email])
+  @@map("tbl_employees")
+}
+
+// -------------------------------------------------------------
+// 3. DEPARTMENTS
+// -------------------------------------------------------------
+model Department {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  name           String    @map("department_name")
+  hodId          String?   @map("hod_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  organization     Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  hod              Employee?                  @relation("DepartmentHOD", fields: [hodId], references: [id], onDelete: SetNull)
+  members          Employee[]                 @relation("DepartmentMembers")
+  additionalAccess EmployeeDepartmentAccess[]
+  files            File[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("tbl_departments")
+}
+
+// -------------------------------------------------------------
+// 4. MULTI-DEPARTMENT ACCESS (Legacy tblSecurity)
+// -------------------------------------------------------------
+model EmployeeDepartmentAccess {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  employeeId     String   @map("employee_id") @db.Uuid
+  departmentId   String   @map("department_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  department   Department   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, departmentId])
+  @@index([organizationId])
+  @@map("tbl_employee_department_access")
+}
+
+// -------------------------------------------------------------
+// 5. VOUCHER TYPES / DOCUMENT TEMPLATES
+// -------------------------------------------------------------
+model VoucherType {
+  id                 String    @id @default(uuid()) @db.Uuid
+  organizationId     String    @map("organization_id") @db.Uuid
+  name               String    @map("voucher_name")
+  signaturesRequired Int       @default(1) @map("signatures_required")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  files        File[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("tbl_voucher_types")
+}
+
+// -------------------------------------------------------------
+// 6. DIGITAL SIGNATURE ASSETS (Cloudflare R2 Object Reference)
+// -------------------------------------------------------------
+model DigitalSignature {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  employeeId     String   @unique @map("employee_id") @db.Uuid
+  fileName       String   @map("file_name")
+  storageKey     String   @map("storage_key")
+  fileUrl        String   @map("file_url")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("tbl_digital_signatures")
+}
+
+// -------------------------------------------------------------
+// 7. FILES / DOCUMENTS (Cloudflare R2 Object Reference)
+// -------------------------------------------------------------
+model File {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  fileName       String @map("file_name")
+  storageKey     String @map("storage_key")
+  fileUrl        String @map("file_url")
+  fileSizeBytes  Int    @default(0) @map("file_size_bytes")
+  mimeType       String @default("application/pdf") @map("mime_type")
+
+  departmentId  String @map("department_id") @db.Uuid
+  voucherTypeId String @map("voucher_type_id") @db.Uuid
+  createdById   String @map("created_by_id") @db.Uuid
+
+  status           FileStatus @default(IN_PROGRESS) @map("status")
+  currentStep      Int        @default(1) @map("current_step")
+  signedByUploader Boolean    @default(false) @map("signed_by_uploader")
+  signaturesDone   Int        @default(0) @map("signatures_done")
+  isSignedByAll    Boolean    @default(false) @map("is_signed_by_all")
+  remarks          String?    @db.Text
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department   Department   @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  voucherType  VoucherType  @relation(fields: [voucherTypeId], references: [id], onDelete: Restrict)
+  createdBy    Employee     @relation("FileCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  signatureLogs SignatureLog[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([departmentId])
+  @@index([createdById])
+  @@map("tbl_files")
+}
+
+// -------------------------------------------------------------
+// 8. SIGNATURE LOGS & APPROVAL LADDER
+// -------------------------------------------------------------
+model SignatureLog {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  fileId         String @map("file_id") @db.Uuid
+  stepOrder      Int    @default(1) @map("step_order")
+
+  employeeId       String  @map("employee_id") @db.Uuid
+  originalSignerId String? @map("original_signer_id") @db.Uuid
+  delegationReason String? @map("delegation_reason") @db.Text
+
+  status    SignatureStatus @default(WAITING) @map("status")
+  signedAt  DateTime?       @map("signed_at")
+  remarks   String?         @db.Text
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  file           File         @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  employee       Employee     @relation("AssignedSigner", fields: [employeeId], references: [id], onDelete: Cascade)
+  originalSigner Employee?    @relation("OriginalSigner", fields: [originalSignerId], references: [id], onDelete: SetNull)
+
+  @@unique([fileId, stepOrder, employeeId])
+  @@index([organizationId])
+  @@index([fileId])
+  @@index([employeeId, status])
+  @@map("tbl_signature_logs")
+}
