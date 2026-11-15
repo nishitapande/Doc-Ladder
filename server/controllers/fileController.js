@@ -1,277 +1,354 @@
-const { sql } = require("../config/dbConfig");
 const { PDFDocument } = require("pdf-lib");
+const prisma = require("../config/prisma");
+const storageService = require("../services/storageService");
+const { success, error } = require("../utils/response");
 
-//GET ALL FILES
-exports.getAllFiles = async (req, res, next) => {
+// Helper to format file response for React client
+const formatFile = (file) => ({
+  id: file.id,
+  FILE_ID: file.id,
+  fileName: file.fileName,
+  FILE_NAME: file.fileName,
+  fileUrl: file.fileUrl,
+  storageKey: file.storageKey,
+  createdOn: file.createdAt,
+  CREATED_ON: file.createdAt,
+  remarks: file.remarks,
+  REMARKS: file.remarks,
+  signedByUploader: file.signedByUploader,
+  SIGNED_BY_UPLOADER: file.signedByUploader,
+  signaturesDone: file.signaturesDone,
+  SIGNATURES_DONE: file.signaturesDone,
+  isSignedByAll: file.isSignedByAll,
+  SIGNED_BY_ALL: file.isSignedByAll,
+  voucherId: file.voucherTypeId,
+  VOUCHER_ID: file.voucherTypeId,
+  voucherName: file.voucherType?.name || "",
+  VOUCHER_NAME: file.voucherType?.name || "",
+  signaturesRequired: file.voucherType?.signaturesRequired || 1,
+  SIGNATURES_REQUIRED: file.voucherType?.signaturesRequired || 1,
+  departmentId: file.departmentId,
+  DEPARTMENT_ID: file.departmentId,
+  departmentName: file.department?.name || "",
+  DEPARTMENT_NAME: file.department?.name || "",
+  createdById: file.createdById,
+  CREATED_BY: file.createdById,
+  creatorName: file.createdBy
+    ? `${file.createdBy.firstName || ""} ${file.createdBy.lastName || ""}`.trim()
+    : "",
+  NAME: file.createdBy
+    ? `${file.createdBy.firstName || ""} ${file.createdBy.lastName || ""}`.trim()
+    : "",
+  status: file.status,
+  STATUS: file.status,
+});
+
+// 1. GET ALL COMPLETED / FULLY SIGNED FILES
+exports.getAllFiles = async (req, res) => {
+  const organizationId = req.organizationId || res.locals.organizationId;
   try {
-    const pool = await sql.connect();
-    const result = await pool
-      .request()
-      .query(
-        `SELECT f.FILE_ID, f.FILE_NAME, f.CREATED_ON,e.FIRST_NAME + " " + e.LAST_NAME AS NAME, f.REMARKS FROM tblFile f INNER JOIN tblDepartment ON tblEmployee AS e ON f.CREATED_BY = e.EMPLOYEE_ID WHERE f.SIGNED_BY_ALL = 1`
-      );
-    res.status(200).json(result);
-  } catch (error) {
-    console.log("Error in getting   all files: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    const files = await prisma.file.findMany({
+      where: {
+        organizationId: organizationId || undefined,
+        isSignedByAll: true,
+        deletedAt: null,
+      },
+      include: {
+        department: true,
+        createdBy: true,
+        voucherType: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return success(res, files.map(formatFile), "All completed files fetched");
+  } catch (err) {
+    console.error("Error in getAllFiles:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-//GET A SINGLE FILE
-exports.getFileById = async (req, res, next) => {
+// 2. GET SINGLE FILE PDF (STREAM TO BROWSER / DOWNLOAD)
+exports.getFileById = async (req, res) => {
   const { id } = req.params;
-  // console.log("fileId", id);
+  const organizationId = req.organizationId || res.locals.organizationId;
+
   try {
-    const pool = await sql.connect();
-    const result = await pool
-      .request()
-      .input("ID", sql.Int, id)
-      .query(`SELECT FILE_DATA,FILE_NAME FROM tblFile WHERE FILE_ID = @ID `);
-    // if (result.recordset.length === 0) {
-    //   return res.status(404).json({ message: "File not found" });
-    // }
-    const { FILE_DATA, FILE_NAME } = result.recordset[0];
+    const file = await prisma.file.findFirst({
+      where: {
+        id,
+        organizationId: organizationId || undefined,
+        deletedAt: null,
+      },
+    });
 
-    res.setHeader("Content-Disposition", `attachment;filename = ${FILE_NAME}`);
-    res.contentType("Content-Type", "application/pdf");
-    res.status(200).send(FILE_DATA);
-  } catch (error) {
-    console.log("Error in getting file by id: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-};
-
-//GET ALL UNSIGNED FILES PER USER
-exports.getAllUnsignedFilePerUser = async (req, res, next) => {
-  const employeeId = res.locals.id;
-  try {
-    const pool = await sql.connect();
-    const getFilesQuery = `SELECT 
-  s.FILE_ID,
-  f.FILE_NAME, 
-  e.FIRST_NAME + ' ' + e.LAST_NAME AS NAME,
-  v.SIGNATURES_REQUIRED,
-  f.SIGNATURES_DONE,
-  f.CREATED_ON,
-  v.VOUCHER_NAME,
-  f.REMARKS,
-  emp.MANAGER_ID
-FROM tblSignatureLog s
-INNER JOIN tblFile f ON s.FILE_ID = f.FILE_ID
-INNER JOIN tblVoucherType v ON f.VOUCHER_ID = v.VOUCHER_ID
-INNER JOIN tblEmployee e ON f.CREATED_BY = e.EMPLOYEE_ID
-INNER JOIN tblEmployee emp ON s.EMPLOYEE_ID = emp.EMPLOYEE_ID
-WHERE s.EMPLOYEE_ID = @EMPLOYEE_ID AND s.STATUS = 0
-ORDER BY f.CREATED_ON DESC`;
-
-    const result = await pool
-      .request()
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(getFilesQuery);
-
-    res.status(200).json(result);
-  } catch (error) {
-    console.log("error in getting all unsigned files: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-};
-
-//GET ALL FILES PER USER THAT ARE CREATED BY THEM
-exports.getAllFilesCreatedByUser = async (req, res, next) => {
-  const employeeId = res.locals.id;
-  try {
-    const pool = await sql.connect();
-    const getFilesQuery = `SELECT 
-    f.FILE_ID, 
-    f.FILE_NAME ,
-    v.VOUCHER_NAME, 
-    f.CREATED_ON,
-    f.REMARKS,
-    f.SIGNED_BY_UPLOADER,
-    f.SIGNED_BY_ALL 
-    FROM tblFile f
-    INNER JOIN tblVoucherType v 
-    ON f.VOUCHER_ID = v.VOUCHER_ID
-    WHERE f.CREATED_BY = @EMPLOYEE_ID
-    ORDER BY f.CREATED_ON DESC`;
-
-    const result = await pool
-      .request()
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(getFilesQuery);
-
-    if (!result) {
-      return res.status(404).json({ error: "Try again later" });
+    if (!file) {
+      return error(res, "File not found", 404);
     }
-    res.status(200).json(result);
-  } catch (error) {
-    console.log("error in getting all files: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+
+    const buffer = await storageService.getFileBuffer(file.storageKey);
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.fileName)}"`);
+    res.setHeader("Content-Type", file.mimeType || "application/pdf");
+    return res.status(200).send(buffer);
+  } catch (err) {
+    console.error("Error in getFileById:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-//DELETE FILE BY USER
-exports.deleteFileByUser = async (req, res, next) => {
-  const { employeeId, pool } = req;
+// 3. GET ALL UNSIGNED FILES AWAITING SIGNATURE FOR CURRENT USER
+exports.getAllUnsignedFilePerUser = async (req, res) => {
+  const employeeId = res.locals.id || req.employeeId;
+  const organizationId = req.organizationId || res.locals.organizationId;
+
+  try {
+    const signatureLogs = await prisma.signatureLog.findMany({
+      where: {
+        employeeId,
+        organizationId: organizationId || undefined,
+        status: "PENDING",
+      },
+      include: {
+        file: {
+          include: {
+            createdBy: {
+              include: { manager: true },
+            },
+            voucherType: true,
+            department: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const formatted = signatureLogs
+      .filter((log) => log.file && !log.file.deletedAt)
+      .map((log) => ({
+        FILE_ID: log.file.id,
+        id: log.file.id,
+        FILE_NAME: log.file.fileName,
+        fileName: log.file.fileName,
+        NAME: log.file.createdBy
+          ? `${log.file.createdBy.firstName || ""} ${log.file.createdBy.lastName || ""}`.trim()
+          : "",
+        SIGNATURES_REQUIRED: log.file.voucherType?.signaturesRequired || 1,
+        signaturesRequired: log.file.voucherType?.signaturesRequired || 1,
+        SIGNATURES_DONE: log.file.signaturesDone,
+        signaturesDone: log.file.signaturesDone,
+        CREATED_ON: log.file.createdAt,
+        createdAt: log.file.createdAt,
+        VOUCHER_NAME: log.file.voucherType?.name || "",
+        voucherName: log.file.voucherType?.name || "",
+        REMARKS: log.file.remarks,
+        remarks: log.file.remarks,
+        MANAGER_ID: log.file.createdBy?.managerId || null,
+        managerId: log.file.createdBy?.managerId || null,
+      }));
+
+    return success(res, formatted, "Unsigned files fetched successfully");
+  } catch (err) {
+    console.error("Error in getAllUnsignedFilePerUser:", err);
+    return error(res, "Internal Server Error", 500);
+  }
+};
+
+// 4. GET ALL FILES CREATED BY CURRENT USER
+exports.getAllFilesCreatedByUser = async (req, res) => {
+  const employeeId = res.locals.id || req.employeeId;
+  const organizationId = req.organizationId || res.locals.organizationId;
+
+  try {
+    const files = await prisma.file.findMany({
+      where: {
+        createdById: employeeId,
+        organizationId: organizationId || undefined,
+        deletedAt: null,
+      },
+      include: {
+        voucherType: true,
+        department: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const formatted = files.map((f) => ({
+      FILE_ID: f.id,
+      id: f.id,
+      FILE_NAME: f.fileName,
+      fileName: f.fileName,
+      VOUCHER_NAME: f.voucherType?.name || "",
+      voucherName: f.voucherType?.name || "",
+      CREATED_ON: f.createdAt,
+      createdAt: f.createdAt,
+      REMARKS: f.remarks,
+      remarks: f.remarks,
+      SIGNED_BY_UPLOADER: f.signedByUploader,
+      signedByUploader: f.signedByUploader,
+      SIGNED_BY_ALL: f.isSignedByAll,
+      isSignedByAll: f.isSignedByAll,
+    }));
+
+    return success(res, formatted, "Files created by user fetched successfully");
+  } catch (err) {
+    console.error("Error in getAllFilesCreatedByUser:", err);
+    return error(res, "Internal Server Error", 500);
+  }
+};
+
+// 5. DELETE FILE BY USER
+exports.deleteFileByUser = async (req, res) => {
+  const employeeId = res.locals.id || req.employeeId;
   const { fileId } = req.params;
-  console.log("fileid: ", fileId);
-  console.log("params:", req.params);
-  const id = parseInt(fileId);
+  const organizationId = req.organizationId || res.locals.organizationId;
+
   try {
-    const getCreatedBy = `SELECT CREATED_BY FROM tblFile WHERE FILE_ID = @FILE_ID`;
+    const file = await prisma.file.findFirst({
+      where: {
+        id: fileId,
+        organizationId: organizationId || undefined,
+        deletedAt: null,
+      },
+    });
 
-    const getResult = await pool
-      .request()
-      .input("FILE_ID", sql.Int, id)
-      .query(getCreatedBy);
-
-    if (!getResult.recordset[0]) {
-      return res.status(404).json({ error: "File not found" });
+    if (!file) {
+      return error(res, "File not found", 404);
     }
 
-    //extract created_by
-    const createdBy = getResult.recordset[0].CREATED_BY;
-
-    //check if createdby is equal to employeeid
-    if (createdBy !== employeeId) {
-      return res
-        .status(403)
-        .json({ error: "You are not authorized to delete this file" });
+    if (file.createdById !== employeeId && req.user?.role !== "ORG_ADMIN") {
+      return error(res, "You are not authorized to delete this file", 403);
     }
 
-    const deleteFileQuery = `DELETE FROM tblFile WHERE FILE_ID = @FILE_ID AND CREATED_BY = @EMPLOYEE_ID`;
+    // Soft delete file
+    await prisma.file.update({
+      where: { id: fileId },
+      data: { deletedAt: new Date() },
+    });
 
-    const result = await pool
-      .request()
-      .input("FILE_ID", sql.Int, id)
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(deleteFileQuery);
-
-    if (!result) {
-      return res.status(404).json({ error: "File not found" });
+    // Optionally delete from storage or leave for audit compliance
+    try {
+      await storageService.deleteFile(file.storageKey);
+    } catch (e) {
+      console.warn("Storage deletion warning:", e.message);
     }
-    res.status(200).json({ message: "File deleted successfully" });
-  } catch (error) {
-    console.log("error in deleting file: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+
+    return success(res, null, "File deleted successfully");
+  } catch (err) {
+    console.error("Error deleting file:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-// AUTHENTICATED USER
-exports.authenticateUser = async (req, res, next) => {
-  const employeeId = res.locals.id;
-
-  if (!employeeId) {
-    return res.status(401).json({ error: "Unauthorized Access" });
-  }
-  req.employeeId = employeeId;
+// 6. PIPELINE MIDDLEWARES FOR UPLOAD AND SIGNING
+exports.authenticateUser = (req, res, next) => {
+  req.employeeId = res.locals.id || req.user?.id;
+  req.organizationId = res.locals.organizationId || req.user?.organizationId;
   next();
 };
 
-// FILE VALIDATION
-exports.validateFileUpload = async (req, res, next) => {
-  // TODO: WHY TO REASSIGN ON 509 LINE
+exports.validateFileUpload = (req, res, next) => {
+  const { fileName, departmentId, voucherId } = req.body;
   const file = req.file;
+
   if (!file) {
-    return res.status(400).json({ error: "No file uploaded" });
+    return error(res, "No file uploaded", 400);
   }
-  if (!["pdf"].includes(file.mimetype.split("/")[1])) {
-    return res
-      .status(400)
-      .json({ error: "Invalid file type. Only PDF are allowed" });
+  if (!fileName || !departmentId || !voucherId) {
+    return error(res, "Filename, Department, and Voucher Type are required", 400);
   }
-  req.file = file;
   next();
 };
 
-// CONNECT TO DB
-exports.connectToDatabase = async (req, res, next) => {
-  try {
-    const pool = await sql.connect();
-    req.pool = pool;
-    next();
-  } catch (error) {
-    console.log("Database connection error: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
+exports.connectToDatabase = (req, res, next) => {
+  // Database connection is managed automatically via PrismaClient singleton
+  next();
 };
 
-//UPLOAD FILE WITHOUT SIGNATURE
+// Step A: Insert without signature (Just Save)
 exports.insertFileWithoutSignature = async (req, res, next) => {
-  const { fileName, departmentId, remarks, fileUploadValue, voucherId } =
-    req.body;
-  const { file, pool, employeeId } = req;
-  // console.log("fileuploadvalue: ", fileUploadValue);
+  const { fileName, departmentId, remarks, fileUploadValue, voucherId } = req.body;
+  const file = req.file;
+  const employeeId = req.employeeId || res.locals.id;
+  const organizationId = req.organizationId || res.locals.organizationId;
 
-  if (fileUploadValue === 1) {
-    console.log(fileUploadValue === 1 ? true : false);
-    const uploadWithoutSignQuery = `INSERT INTO tblFile(FILE_NAME,FILE_DATA,CREATED_BY,DEPARTMENT_ID,VOUCHER_ID,REMARKS)
-    VALUES(@FILE_NAME,@FILE_DATA,@CREATED_BY,@DEPARTMENT_ID,@VOUCHER_ID,@REMARKS)`;
-    await pool
-      .request()
-      .input("FILE_NAME", sql.NVarChar, fileName)
-      .input("FILE_DATA", sql.VarBinary(sql.MAX), file?.buffer)
-      .input("CREATED_BY", sql.Int, employeeId)
-      .input("DEPARTMENT_ID", sql.Int, departmentId)
-      .input("VOUCHER_ID", sql.Int, voucherId)
-      .input("REMARKS", sql.NVarChar, remarks)
-      .query(uploadWithoutSignQuery);
+  if (parseInt(fileUploadValue, 10) === 1) {
+    try {
+      const storageKey = `files/${organizationId}/${Date.now()}_${fileName}.pdf`;
+      const uploaded = await storageService.uploadFile({
+        storageKey,
+        buffer: file.buffer,
+        mimeType: file.mimetype || "application/pdf",
+      });
 
-    return res.status(200).json({ message: "File just saved!!" });
+      const newFile = await prisma.file.create({
+        data: {
+          organizationId,
+          fileName,
+          storageKey: uploaded.storageKey,
+          fileUrl: uploaded.fileUrl,
+          fileSizeBytes: uploaded.sizeBytes,
+          mimeType: file.mimetype || "application/pdf",
+          departmentId,
+          voucherTypeId: voucherId,
+          createdById: employeeId,
+          remarks: remarks || null,
+          signedByUploader: false,
+          signaturesDone: 0,
+          isSignedByAll: false,
+        },
+      });
+
+      return success(res, formatFile(newFile), "File just saved successfully");
+    } catch (err) {
+      console.error("Error inserting file without signature:", err);
+      return error(res, "Failed to save file", 500);
+    }
   }
   next();
 };
 
-//GET DIGITAL SIGNATURE
+// Step B: Fetch user's digital signature
 exports.fetchDigitalSignature = async (req, res, next) => {
-  const { pool, employeeId } = req;
+  const employeeId = req.employeeId || res.locals.id;
   try {
-    const getDigitalSignatureQuery = `SELECT FILE_DATA FROM tblDigitalSignature WHERE CREATED_BY = @EMPLOYEE_ID`;
-    const result = await pool
-      .request()
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(getDigitalSignatureQuery);
+    const signature = await prisma.digitalSignature.findUnique({
+      where: { employeeId },
+    });
 
-    if (!result.recordset.length) {
-      return res
-        .status(404)
-        .json({ error: "No digital signature found for this user" });
+    if (!signature) {
+      return error(res, "No digital signature found for this user. Please upload your signature first.", 404);
     }
-    const digitalSignature = result.recordset[0].FILE_DATA;
-    if (!Buffer.isBuffer(digitalSignature)) {
-      return res.status(500).json({ error: "Internal Server Error" });
-    }
-    req.digitalSignature = digitalSignature;
+
+    const buffer = await storageService.getFileBuffer(signature.storageKey);
+    req.digitalSignature = buffer;
     next();
-  } catch (error) {
-    console.log("error in fetching digital signature: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("Error fetching digital signature:", err);
+    return error(res, "Failed to fetch digital signature", 500);
   }
 };
 
-//GET SIGNATURES REQUIRED
+// Step C: Fetch signatures required
 exports.getSignaturesRequired = async (req, res, next) => {
   const { voucherId } = req.body;
-  const { pool } = req;
   try {
-    const getSignaturesRequiredQuery = `SELECT SIGNATURES_REQUIRED FROM tblVoucherType WHERE VOUCHER_ID = @VOUCHER_ID`;
-    const result = await pool
-      .request()
-      .input("VOUCHER_ID", sql.Int, voucherId)
-      .query(getSignaturesRequiredQuery);
-    if (!result.recordset.length) {
-      return res.status(404).json({ error: "Voucher not found" });
+    const voucher = await prisma.voucherType.findUnique({
+      where: { id: voucherId },
+    });
+
+    if (!voucher) {
+      return error(res, "Voucher type not found", 404);
     }
-    const signaturesRequired = result.recordset[0].SIGNATURES_REQUIRED;
-    req.signaturesRequired = signaturesRequired;
+
+    req.signaturesRequired = voucher.signaturesRequired;
     next();
-  } catch (error) {
-    console.log("error in getting signatures required: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("Error getting signatures required:", err);
+    return error(res, "Failed to get voucher requirements", 500);
   }
 };
 
-//PROCESS PDF
+// Step D: Stamp digital signature onto PDF
 exports.addDigitalSignature = async (req, res, next) => {
   const { digitalSignature, file, signaturesRequired } = req;
   try {
@@ -280,21 +357,18 @@ exports.addDigitalSignature = async (req, res, next) => {
     const pages = pdfDoc.getPages();
     const lastPage = pages[pages.length - 1];
     const pageWidth = lastPage.getWidth();
-    //TODO: CHECKING IF THE IMAGE DOES NOT OVERWRITE THE PDF
+
     const desiredWidth = 100;
     const desiredHeight = 50;
     const margin = 50;
-    console.log(pageWidth);
+    const sigCount = signaturesRequired || 1;
     const gapBetweenSignatures =
-      (pageWidth - 2 * margin - desiredWidth * signaturesRequired) /
-      (signaturesRequired - 1);
+      sigCount > 1
+        ? (pageWidth - 2 * margin - desiredWidth * sigCount) / (sigCount - 1)
+        : 0;
 
-    let signaturesDone;
-    signaturesDone = 0;
-    const positionX =
-      margin +
-      desiredWidth * signaturesDone +
-      gapBetweenSignatures * (signaturesDone === 0 ? 0 : signaturesDone);
+    const signaturesDone = 0;
+    const positionX = margin + desiredWidth * signaturesDone + gapBetweenSignatures * signaturesDone;
 
     lastPage.drawImage(pngImage, {
       x: positionX,
@@ -302,185 +376,190 @@ exports.addDigitalSignature = async (req, res, next) => {
       width: desiredWidth,
       height: desiredHeight,
     });
+
     const updatedPdfBytes = await pdfDoc.save();
     req.updatedPdfBuffer = Buffer.from(updatedPdfBytes);
     next();
-  } catch (error) {
-    console.log("error in adding digital signature: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("Error stamping digital signature:", err);
+    return error(res, "Failed to process PDF signature", 500);
   }
 };
 
-//INSERT SIGNED FILE IN DB
+// Step E: Insert file with signature
 exports.insertFileWithSignature = async (req, res, next) => {
   const { fileName, departmentId, remarks, voucherId } = req.body;
-  const { updatedPdfBuffer, pool, employeeId } = req;
+  const { updatedPdfBuffer, employeeId, organizationId } = req;
 
   try {
-    const uQuery = `INSERT INTO tblFile (FILE_NAME,FILE_DATA,CREATED_BY,DEPARTMENT_ID,VOUCHER_ID,REMARKS,SIGNATURES_DONE,SIGNED_BY_UPLOADER) 
-    OUTPUT INSERTED.FILE_ID 
-    VALUES (@FILE_NAME,@FILE_DATA,@CREATED_BY,@DEPARTMENT_ID,@VOUCHER_ID,@REMARKS,@SIGNATURES_DONE,@SIGNED_BY_UPLOADER)`;
+    const storageKey = `files/${organizationId}/${Date.now()}_${fileName}.pdf`;
+    const uploaded = await storageService.uploadFile({
+      storageKey,
+      buffer: updatedPdfBuffer,
+      mimeType: "application/pdf",
+    });
 
-    const result = await pool
-      .request()
-      .input("FILE_NAME", sql.NVarChar, fileName)
-      .input("FILE_DATA", sql.VarBinary(sql.MAX), updatedPdfBuffer)
-      .input("CREATED_BY", sql.Int, employeeId)
-      .input("DEPARTMENT_ID", sql.Int, departmentId)
-      .input("VOUCHER_ID", sql.Int, voucherId)
-      .input("REMARKS", sql.NVarChar, remarks)
-      .input("SIGNATURES_DONE", sql.Int, 1)
-      .input("SIGNED_BY_UPLOADER", sql.Bit, 1)
-      .query(uQuery);
+    const newFile = await prisma.file.create({
+      data: {
+        organizationId,
+        fileName,
+        storageKey: uploaded.storageKey,
+        fileUrl: uploaded.fileUrl,
+        fileSizeBytes: uploaded.sizeBytes,
+        mimeType: "application/pdf",
+        departmentId,
+        voucherTypeId: voucherId,
+        createdById: employeeId,
+        remarks: remarks || null,
+        signedByUploader: true,
+        signaturesDone: 1,
+        isSignedByAll: false,
+      },
+    });
 
-    const fileId = result.recordset[0].FILE_ID;
-    req.fileId = fileId;
+    req.fileId = newFile.id;
+    req.createdFile = newFile;
 
-    const insertIntoSignatureLogQuery = `INSERT INTO tblSignatureLog(FILE_ID,EMPLOYEE_ID,TIME_STAMP,STATUS) VALUES(@FILE_ID,@EMPLOYEE_ID,@TIME_STAMP,@STATUS)`;
-
-    await pool
-      .request()
-      .input("FILE_ID", sql.Int, fileId)
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .input("TIME_STAMP", sql.DateTime, new Date())
-      .input("STATUS", sql.Int, 1)
-      .query(insertIntoSignatureLogQuery);
+    // Log the uploader's signature
+    await prisma.signatureLog.create({
+      data: {
+        organizationId,
+        fileId: newFile.id,
+        employeeId,
+        stepOrder: 1,
+        status: "SIGNED",
+        signedAt: new Date(),
+      },
+    });
 
     next();
-  } catch (error) {
-    console.log("error in inserting file with signature: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("Error inserting signed file:", err);
+    return error(res, "Failed to save signed file", 500);
   }
 };
 
-//SENDING FORWARD FOR APPROVAL
-exports.forwardForApproval = async (req, res, next) => {
-  const { fileId, pool, body, signaturesRequired } = req;
+// Step F: Forward for approval to next recipient
+exports.forwardForApproval = async (req, res) => {
+  const { fileId, organizationId, signaturesRequired, body } = req;
   const { fileUploadValue, sendFileTo } = body;
-  // console.log("fileUploadValue: ", fileUploadValue);
-  // console.log(typeof fileUploadValue);
+
   try {
+    // If only 1 signature was required, document is already complete!
     if (signaturesRequired === 1) {
-      const updateTheFileQuery = `
-      UPDATE tblFile
-      SET SIGNED_BY_ALL = @SIGNED_BY_ALL
-      WHERE FILE_ID = @FILE_ID
-      `;
-      const updateResult = await pool
-        .request()
-        .input("SIGNED_BY_ALL", sql.Bit, 1)
-        .input("FILE_ID", sql.Int, fileId)
-        .query(updateTheFileQuery);
-
-      return res.status(200).json({ message: "File approved for approval" });
+      await prisma.file.update({
+        where: { id: fileId },
+        data: {
+          isSignedByAll: true,
+          status: "COMPLETED",
+        },
+      });
+      return success(res, { fileId, status: "COMPLETED" }, "File approved and completed");
     }
-    if (fileUploadValue == 3) {
-      //insert into signature log
-      console.log("here reached");
-      const insertIntoSignatureLogQuery = `
-      INSERT INTO tblSignatureLog(FILE_ID, EMPLOYEE_ID,STATUS) VALUES(@FILE_ID,@EMPLOYEE_ID,@STATUS)`;
-      await pool
-        .request()
-        .input("FILE_ID", sql.Int, fileId)
-        .input("EMPLOYEE_ID", sql.Int, sendFileTo)
-        .input("STATUS", sql.Int, 0)
-        .query(insertIntoSignatureLogQuery);
 
-      return res.status(200).json({ message: "File forwarded for approval" });
+    // If forwarded to next person (e.g. manager)
+    if (parseInt(fileUploadValue, 10) === 3 && sendFileTo) {
+      await prisma.signatureLog.upsert({
+        where: {
+          fileId_stepOrder_employeeId: {
+            fileId,
+            stepOrder: 2,
+            employeeId: sendFileTo,
+          },
+        },
+        create: {
+          organizationId,
+          fileId,
+          stepOrder: 2,
+          employeeId: sendFileTo,
+          status: "PENDING",
+        },
+        update: {
+          status: "PENDING",
+        },
+      });
+
+      return success(res, { fileId, sendFileTo }, "File forwarded for approval successfully");
     }
-    return res
-      .status(200)
-      .json({ message: "File uploaded and saved successfullyg" });
-  } catch (error) {
-    console.log("error in forwarding for approval: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+
+    return success(res, { fileId }, "File uploaded and signed successfully");
+  } catch (err) {
+    console.error("Error in forwardForApproval:", err);
+    return error(res, "Failed to forward file", 500);
   }
 };
 
-//GET THE EXISTING PDF
+// 7. GET EXISTING PDF FOR EDITING / SIGNING
 exports.getPdf = async (req, res, next) => {
-  const { pool } = req;
   const { id } = req.params;
-  const fileId = id;
+  const organizationId = req.organizationId || res.locals.organizationId;
+
   try {
-    const getExistingPdfQuery = `SELECT FILE_DATA,VOUCHER_ID FROM tblFile WHERE FILE_ID = @FILE_ID`;
-    const result = await pool
-      .request()
-      .input("FILE_ID", sql.Int, fileId)
-      .query(getExistingPdfQuery);
-    if (!result.recordset.length) {
-      return res.status(404).json({ error: "File not found" });
+    const file = await prisma.file.findFirst({
+      where: {
+        id,
+        organizationId: organizationId || undefined,
+        deletedAt: null,
+      },
+    });
+
+    if (!file) {
+      return error(res, "File not found", 404);
     }
-    const existingPdf = result.recordset[0].FILE_DATA;
-    const voucherId = result.recordset[0].VOUCHER_ID;
-    req.existingPdfBytes = existingPdf;
-    req.voucherId = voucherId;
+
+    const buffer = await storageService.getFileBuffer(file.storageKey);
+    req.existingPdfBytes = buffer;
+    req.fileRecord = file;
+    req.voucherId = file.voucherTypeId;
     next();
-  } catch (error) {
-    console.log("error in getting existing pdf: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("Error in getPdf:", err);
+    return error(res, "Failed to fetch existing PDF", 500);
   }
 };
 
-//SIGNATURES REQUIRED FOR EDITING
+// 8. GET SIGNATURES REQUIRED FOR EDITING
 exports.getSignaturesRequiredForEditing = async (req, res, next) => {
-  const { id } = req.params;
-  const fileId = id;
-  const { pool } = req;
+  const file = req.fileRecord;
   try {
-    const getSignaturesRequiredQuery = `SELECT v.SIGNATURES_REQUIRED FROM tblFile f INNER JOIN tblVoucherType v 
-    ON f.VOUCHER_ID = v.VOUCHER_ID WHERE FILE_ID = @FILE_ID`;
-    const result = await pool
-      .request()
-      .input("FILE_ID", sql.Int, fileId)
-      .query(getSignaturesRequiredQuery);
-    if (!result.recordset.length) {
-      return res.status(404).json({ error: "File not found" });
+    const voucher = await prisma.voucherType.findUnique({
+      where: { id: file.voucherTypeId },
+    });
+
+    if (!voucher) {
+      return error(res, "Voucher type not found", 404);
     }
-    const signaturesRequired = result.recordset[0].SIGNATURES_REQUIRED;
-    req.signaturesRequired = signaturesRequired;
+
+    req.signaturesRequired = voucher.signaturesRequired;
     next();
-  } catch (error) {
-    console.log("error in getting signatures required for editing: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("Error in getSignaturesRequiredForEditing:", err);
+    return error(res, "Failed to get voucher requirements", 500);
   }
 };
 
-//EDIT TO ADD DIGITAL SIGNATURE
+// 9. STAMP SIGNATURE FOR SUBSEQUENT SIGNERS
 exports.editToAddDigitalSignature = async (req, res, next) => {
-  const { existingPdfBytes, digitalSignature, signaturesRequired, pool } = req;
-  const { id } = req.params;
-  const fileId = id;
+  const { existingPdfBytes, digitalSignature, signaturesRequired, fileRecord } = req;
+
   try {
     const pdfDoc = await PDFDocument.load(existingPdfBytes);
     const pngImage = await pdfDoc.embedPng(digitalSignature);
     const pages = pdfDoc.getPages();
     const lastPage = pages[pages.length - 1];
     const pageWidth = lastPage.getWidth();
+
     const desiredWidth = 100;
     const desiredHeight = 50;
     const margin = 50;
+    const sigCount = signaturesRequired || 1;
     const gapBetweenSignatures =
-      (pageWidth - 2 * margin - desiredWidth * signaturesRequired) /
-      (signaturesRequired - 1);
-    let signaturesDone = 0;
+      sigCount > 1
+        ? (pageWidth - 2 * margin - desiredWidth * sigCount) / (sigCount - 1)
+        : 0;
 
-    if (fileId) {
-      const signResult = await pool
-        .request()
-        .input("FILE_ID", sql.Int, fileId)
-        .query(`SELECT SIGNATURES_DONE FROM tblFile WHERE FILE_ID = @FILE_ID`);
-      if (!signResult.recordset.length) {
-        return res.status(404).json({ error: "File not found" });
-      }
-      signaturesDone = signResult.recordset[0]?.SIGNATURES_DONE;
-    } else {
-      signaturesDone = 0;
-    }
-    const positionX =
-      margin +
-      desiredWidth * signaturesDone +
-      gapBetweenSignatures * (signaturesDone === 0 ? 0 : signaturesDone);
+    const signaturesDone = fileRecord.signaturesDone || 0;
+    const positionX = margin + desiredWidth * signaturesDone + gapBetweenSignatures * signaturesDone;
 
     lastPage.drawImage(pngImage, {
       x: positionX,
@@ -488,475 +567,453 @@ exports.editToAddDigitalSignature = async (req, res, next) => {
       width: desiredWidth,
       height: desiredHeight,
     });
+
     const updatedPdfBytes = await pdfDoc.save();
     req.updatedPdfBuffer = Buffer.from(updatedPdfBytes);
     next();
-  } catch (error) {
-    console.log("error in editing to add digital signature: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("Error in editToAddDigitalSignature:", err);
+    return error(res, "Failed to stamp digital signature", 500);
   }
 };
 
-//UPDATE THE PDF
+// 10. UPDATE PDF AND SIGNATURE LOG AFTER SIGNING
 exports.updateThePdf = async (req, res, next) => {
   const { id } = req.params;
-  const fileId = id;
-  const { employeeId, updatedPdfBuffer, pool } = req;
+  const { employeeId, organizationId, updatedPdfBuffer, fileRecord, signaturesRequired } = req;
   const { sendTo } = req.body;
+
   try {
-    const updateThePdfQuery = `
-   BEGIN TRANSACTION
-   UPDATE tblFile
-   SET
-   FILE_DATA = @FILE_DATA,
-   SIGNATURES_DONE = SIGNATURES_DONE + 1,
-   SIGNED_BY_ALL = CASE
-        WHEN (SIGNATURES_DONE + 1) = v.SIGNATURES_REQUIRED THEN 1
-        ELSE SIGNED_BY_ALL
-        END
-   FROM tblFile f
-   INNER JOIN tblVoucherType v
-   ON f.VOUCHER_ID = v.VOUCHER_ID
-   WHERE FILE_ID = @FILE_ID;
+    // 1. Save updated PDF back to storage
+    await storageService.uploadFile({
+      storageKey: fileRecord.storageKey,
+      buffer: updatedPdfBuffer,
+      mimeType: "application/pdf",
+    });
 
-   SELECT SIGNED_BY_ALL FROM tblFile WHERE FILE_ID = @FILE_ID
+    const nextSignaturesDone = fileRecord.signaturesDone + 1;
+    const isSignedByAll = nextSignaturesDone >= signaturesRequired;
 
-   COMMIT TRANSACTION
-    `;
-    const result = await pool
-      .request()
-      .input("FILE_DATA", sql.VarBinary(sql.MAX), updatedPdfBuffer)
-      .input("FILE_ID", sql.Int, fileId)
-      .query(updateThePdfQuery);
+    // 2. Update File record
+    await prisma.file.update({
+      where: { id },
+      data: {
+        signaturesDone: nextSignaturesDone,
+        isSignedByAll,
+        status: isSignedByAll ? "COMPLETED" : "IN_PROGRESS",
+      },
+    });
 
-    const isSignedByAll = result.recordset[0].SIGNED_BY_ALL;
+    // 3. Mark SignatureLog as signed
+    await prisma.signatureLog.updateMany({
+      where: {
+        fileId: id,
+        employeeId,
+      },
+      data: {
+        status: "SIGNED",
+        signedAt: new Date(),
+      },
+    });
 
-    const updateSignatureLogQuery = `
-    UPDATE tblSignatureLog
-    SET STATUS = 1,
-    TIME_STAMP = GETDATE()
-    WHERE FILE_ID = @FILE_ID AND EMPLOYEE_ID = @EMPLOYEE_ID
-    `;
-    await pool
-      .request()
-      .input("FILE_ID", sql.Int, fileId)
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(updateSignatureLogQuery);
-
-    if (isSignedByAll === 0 && sendTo) {
+    // 4. If not completed and sendTo specified, forward to next signer
+    if (!isSignedByAll && sendTo) {
+      req.sendTo = sendTo;
       return next();
     }
-    return res.status(200).json({ message: "File updated successfully" });
-  } catch (error) {
-    console.log("error in updating the pdf: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+
+    return success(res, { id, isSignedByAll }, "Digital signature applied and PDF updated successfully");
+  } catch (err) {
+    console.error("Error in updateThePdf:", err);
+    return error(res, "Failed to update PDF", 500);
   }
 };
 
-//DECLINE A FILE
-exports.declineFile = async (req, res, next) => {
+// 11. JUST SIGN UPDATE (STANDALONE SIGNING)
+exports.justSignUpadte = async (req, res) => {
+  const { id } = req.params;
+  const { employeeId, updatedPdfBuffer, fileRecord, signaturesRequired } = req;
+
+  try {
+    await storageService.uploadFile({
+      storageKey: fileRecord.storageKey,
+      buffer: updatedPdfBuffer,
+      mimeType: "application/pdf",
+    });
+
+    const nextSignaturesDone = fileRecord.signaturesDone + 1;
+    const isSignedByAll = nextSignaturesDone >= (signaturesRequired || 1);
+
+    await prisma.file.update({
+      where: { id },
+      data: {
+        signaturesDone: nextSignaturesDone,
+        isSignedByAll,
+        status: isSignedByAll ? "COMPLETED" : "IN_PROGRESS",
+      },
+    });
+
+    await prisma.signatureLog.updateMany({
+      where: {
+        fileId: id,
+        employeeId,
+      },
+      data: {
+        status: "SIGNED",
+        signedAt: new Date(),
+      },
+    });
+
+    return success(res, { id, isSignedByAll }, "Digital signature added and PDF updated successfully");
+  } catch (err) {
+    console.error("Error in justSignUpadte:", err);
+    return error(res, "Internal Server Error", 500);
+  }
+};
+
+// 12. DECLINE / REJECT A FILE
+exports.declineFile = async (req, res) => {
+  const { id } = req.params;
   const { remarks } = req.body;
-  const { pool, employeeId } = req;
-  const { id } = req.params;
-  const fileId = id;
-  try {
-    //TODO: FIND IF ITS THE CORRECT MANAGER!!
-    const declineQuery = `
-    UPDATE tblSignatureLog
-    SET 
-    STATUS = 2,
-    TIME_STAMP = @TIME_STAMP,
-    REMARKS = @REMARKS
-    WHERE FILE_ID = @FILE_ID AND EMPLOYEE_ID = @EMPLOYEE_ID
-    `;
-    const declineResult = await pool
-      .request()
-      .input("TIME_STAMP", sql.DateTime, new Date())
-      .input("REMARKS", sql.NVarChar, remarks)
-      .input("FILE_ID", sql.Int, fileId)
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(declineQuery);
+  const employeeId = res.locals.id || req.employeeId;
 
-    return res.status(200).json({ message: "File declined for approval" });
-  } catch (error) {
-    console.log("error in declining file: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+  try {
+    await prisma.signatureLog.updateMany({
+      where: {
+        fileId: id,
+        employeeId,
+      },
+      data: {
+        status: "REJECTED",
+        signedAt: new Date(),
+        remarks: remarks || "Declined by signer",
+      },
+    });
+
+    await prisma.file.update({
+      where: { id },
+      data: {
+        status: "REJECTED",
+      },
+    });
+
+    return success(res, null, "File declined successfully");
+  } catch (err) {
+    console.error("Error in declineFile:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-// GET ALL APPROVED FILES PER USER
-exports.approvedFilesPerUser = async (req, res, next) => {
-  const { employeeId, pool } = req;
+// 13. APPROVED FILES PER USER
+exports.approvedFilesPerUser = async (req, res) => {
+  const employeeId = res.locals.id || req.employeeId;
+  const organizationId = req.organizationId || res.locals.organizationId;
+
   try {
-    const searchQuery = ` 
-    SELECT
-    f.FILE_ID,
-    f.FILE_NAME,
-    f.CREATED_ON,
-    f.REMARKS,
-    v.VOUCHER_NAME
-    FROM tblFile f
-    INNER JOIN tblVoucherType v ON f.VOUCHER_ID = v.VOUCHER_ID
-    WHERE f.SIGNED_BY_ALL = 1 AND f.CREATED_BY = @EMPLOYEE_ID
-    ORDER BY
-    f.CREATED_ON DESC
-    `;
-    const result = await pool
-      .request()
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(searchQuery);
-    res.status(200).json(result);
-  } catch (error) {
-    console.log("error in fetching approved files: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    const files = await prisma.file.findMany({
+      where: {
+        createdById: employeeId,
+        organizationId: organizationId || undefined,
+        isSignedByAll: true,
+        deletedAt: null,
+      },
+      include: { voucherType: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const formatted = files.map((f) => ({
+      FILE_ID: f.id,
+      id: f.id,
+      FILE_NAME: f.fileName,
+      fileName: f.fileName,
+      CREATED_ON: f.createdAt,
+      createdAt: f.createdAt,
+      REMARKS: f.remarks,
+      remarks: f.remarks,
+      VOUCHER_NAME: f.voucherType?.name || "",
+      voucherName: f.voucherType?.name || "",
+    }));
+
+    return success(res, formatted, "Approved files fetched");
+  } catch (err) {
+    console.error("Error in approvedFilesPerUser:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-// GET ALL DECLINED FILES PER USER
-exports.declinedFilesPerUser = async (req, res, next) => {
-  const { employeeId, pool } = req;
+// 14. DECLINED FILES PER USER
+exports.declinedFilesPerUser = async (req, res) => {
+  const employeeId = res.locals.id || req.employeeId;
+  const organizationId = req.organizationId || res.locals.organizationId;
+
   try {
-    const searchQuery = `
-    SELECT
-    f.FILE_ID,
-    f.FILE_NAME,
-    f.CREATED_BY,
-    sl.REMARKS,
-    e.FIRST_NAME + ' ' + e.LAST_NAME AS PERSON_WHO_DECLINED,
-    v.VOUCHER_NAME
-    FROM tblFile f
-    JOIN tblSignatureLog sl 
-    ON f.FILE_ID = sl.FILE_ID
-    JOIN tblEmployee e
-    ON sl.EMPLOYEE_ID = e.EMPLOYEE_ID
-    INNER JOIN tblVoucherType v 
-    ON f.VOUCHER_ID = v.VOUCHER_ID
-    WHERE sl.STATUS = 2 AND f.CREATED_BY = @EMPLOYEE_ID
-    ORDER BY
-    f.CREATED_ON DESC
-    `;
-    const result = await pool
-      .request()
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(searchQuery);
-    res.status(200).json(result);
-  } catch (error) {
-    console.log("error in fetching declined files: ", error);
-    res.status(500).json({ error: "Internal server error" });
+    const declinedLogs = await prisma.signatureLog.findMany({
+      where: {
+        status: "REJECTED",
+        organizationId: organizationId || undefined,
+        file: {
+          createdById: employeeId,
+          deletedAt: null,
+        },
+      },
+      include: {
+        file: {
+          include: { voucherType: true },
+        },
+        employee: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const formatted = declinedLogs.map((log) => ({
+      FILE_ID: log.file.id,
+      id: log.file.id,
+      FILE_NAME: log.file.fileName,
+      fileName: log.file.fileName,
+      CREATED_BY: log.file.createdById,
+      createdById: log.file.createdById,
+      REMARKS: log.remarks || "",
+      remarks: log.remarks || "",
+      PERSON_WHO_DECLINED: log.employee
+        ? `${log.employee.firstName || ""} ${log.employee.lastName || ""}`.trim()
+        : "",
+      VOUCHER_NAME: log.file.voucherType?.name || "",
+      voucherName: log.file.voucherType?.name || "",
+      CREATED_ON: log.createdAt,
+      createdAt: log.createdAt,
+    }));
+
+    return success(res, formatted, "Declined files fetched");
+  } catch (err) {
+    console.error("Error in declinedFilesPerUser:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-//GET ALL UNSIGNED SAVED FILES PER USER
+// 15. UNSIGNED SAVED FILES PER USER
+exports.unsignedSavedFilesPerUser = async (req, res) => {
+  const employeeId = res.locals.id || req.employeeId;
+  const organizationId = req.organizationId || res.locals.organizationId;
 
-exports.unsignedSavedFilesPerUser = async (req, res, next) => {
-  const { employeeId, pool } = req;
   try {
-    const searchQuery = `
-    SELECT
-    f.FILE_ID,
-    f.FILE_NAME,
-    f.CREATED_ON,
-    f.SIGNED_BY_UPLOADER,
-    f.REMARKS,
-    v.VOUCHER_NAME
-    FROM tblFile f
-    INNER JOIN tblVoucherType v 
-    ON f.VOUCHER_ID = v.VOUCHER_ID
-    WHERE 
-    (f.SIGNED_BY_UPLOADER = 0 OR (f.SIGNED_BY_UPLOADER = 1 AND f.SIGNED_BY_ALL = 0))
-    AND CREATED_BY = @EMPLOYEE_ID
-    AND NOT EXISTS(
-      SELECT 1
-      FROM tblSignatureLog sl
-      WHERE sl.FILE_ID = f.FILE_ID 
-     GROUP BY sl.FILE_ID 
-      HAVING COUNT(*) >= 2
-    )
-    ORDER BY
-    f.CREATED_ON DESC
-    `;
-    const result = await pool
-      .request()
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(searchQuery);
-    res.status(200).json(result);
-  } catch (error) {
-    console.log("error in fetching unsigned saved files: ", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    const files = await prisma.file.findMany({
+      where: {
+        createdById: employeeId,
+        organizationId: organizationId || undefined,
+        deletedAt: null,
+        isSignedByAll: false,
+        signatureLogs: {
+          none: {
+            stepOrder: { gte: 2 },
+          },
+        },
+      },
+      include: { voucherType: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const formatted = files.map((f) => ({
+      FILE_ID: f.id,
+      id: f.id,
+      FILE_NAME: f.fileName,
+      fileName: f.fileName,
+      CREATED_ON: f.createdAt,
+      createdAt: f.createdAt,
+      SIGNED_BY_UPLOADER: f.signedByUploader,
+      signedByUploader: f.signedByUploader,
+      REMARKS: f.remarks,
+      remarks: f.remarks,
+      VOUCHER_NAME: f.voucherType?.name || "",
+      voucherName: f.voucherType?.name || "",
+    }));
+
+    return success(res, formatted, "Unsigned saved files fetched");
+  } catch (err) {
+    console.error("Error in unsignedSavedFilesPerUser:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-//GET ALL SAVED FILES PER USER
-exports.getAllSavedFilesPerUser = async (req, res, next) => {
-  const { employeeId, pool } = req;
-  try {
-    const searchQuery = `
-    SELECT
-    f.FILE_ID,
-    f.FILE_NAME,
-    f.CREATED_BY,
-    f.REMARKS,
-    f.CREATED_ON,
-    f.SIGNED_BY_UPLOADER,
-    f.SIGNED_BY_ALL,
-    v.VOUCHER_NAME
-    FROM tblFile f
-    INNER JOIN tblVoucher v ON f.VOUCHER_ID = v.VOUCHER_ID
-    WHERE (f.SIGNED_BY_UPLOADER = 0 OR (f.SIGNED_BY_UPLOADER = 1 AND f.SIGNED_BY_ALL = 0))
-          AND f.CREATED_BY = @EMPLOYEE_ID
-          AND NOT EXITS(
-          SELECT 1 FROM tblSignatureLog sl WHERE sl.FILE_ID = f.FILE_ID AND GROUP BY sl.FILE_ID HAVING COUNT(*) >=2
-      )    
-          ORDER BY f.CREATED_ON DESC
-    `;
-    const result = await pool
-      .request()
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(searchQuery);
-    return res.status(200).json(result);
-  } catch (error) {
-    console.log("error in fetching all saved files: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
-};
+// 16. ALL SAVED FILES PER USER
+exports.getAllSavedFilesPerUser = exports.unsignedSavedFilesPerUser;
 
-//GET ALL FILES PER PARAMS
-exports.getFiles = async (req, res, next) => {
-  const { pool } = req;
-  const { department_id, start_date, end_date, page, pageSize, created_by } =
-    req.query;
+// 17. GET FILES FILTERED WITH PAGINATION
+exports.getFiles = async (req, res) => {
+  const organizationId = req.organizationId || res.locals.organizationId;
+  const { department_id, start_date, end_date, page, pageSize, created_by } = req.query;
 
-  // Validate department_id, page, and pageSize
-  if (!department_id || isNaN(department_id) || department_id <= 0) {
-    return res.status(400).json({ error: "Invalid department ID" });
+  if (!department_id) {
+    return error(res, "Invalid department ID", 400);
   }
 
-  const validPage = page && !isNaN(page) && page > 0 ? parseInt(page) : 1;
-  const validPageSize =
-    pageSize && !isNaN(pageSize) && pageSize > 0 ? parseInt(pageSize) : 10;
-  const offset = (validPage - 1) * validPageSize;
+  const validPage = parseInt(page, 10) > 0 ? parseInt(page, 10) : 1;
+  const validPageSize = parseInt(pageSize, 10) > 0 ? parseInt(pageSize, 10) : 10;
+  const skip = (validPage - 1) * validPageSize;
+
+  const where = {
+    organizationId: organizationId || undefined,
+    departmentId: department_id,
+    isSignedByAll: true,
+    deletedAt: null,
+  };
+
+  if (start_date || end_date) {
+    where.createdAt = {};
+    if (start_date) where.createdAt.gte = new Date(start_date);
+    if (end_date) where.createdAt.lte = new Date(end_date);
+  }
+
+  if (created_by) {
+    where.createdById = created_by;
+  }
 
   try {
-    const request = pool
-      .request()
-      .input("DEPARTMENT_ID", sql.Int, department_id);
+    const [totalCount, files] = await Promise.all([
+      prisma.file.count({ where }),
+      prisma.file.findMany({
+        where,
+        include: { createdBy: true },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: validPageSize,
+      }),
+    ]);
 
-    let query = `
-      SELECT f.FILE_ID, f.FILE_NAME, f.CREATED_ON, f.REMARKS, 
-             e.FIRST_NAME + ' ' + e.LAST_NAME AS NAME, 
-             COUNT(*) OVER() AS TOTAL_COUNT 
-      FROM tblFile f
-      INNER JOIN tblEmployee e 
-      ON f.CREATED_BY = e.EMPLOYEE_ID
-      WHERE f.DEPARTMENT_ID = @DEPARTMENT_ID AND f.SIGNED_BY_ALL = 1
-    `;
-
-    if (start_date) {
-      query += ` AND f.CREATED_ON >= @START_DATE`;
-      request.input("START_DATE", sql.Date, start_date);
-    }
-    if (end_date) {
-      query += ` AND f.CREATED_ON <= @END_DATE`;
-      request.input("END_DATE", sql.Date, end_date);
-    }
-    if (created_by) {
-      query += ` AND f.CREATED_BY = @CREATED_BY`;
-      request.input("CREATED_BY", sql.Int, created_by);
-    }
-
-    query += ` ORDER BY f.CREATED_ON DESC OFFSET @OFFSET ROWS FETCH NEXT @PAGE_SIZE ROWS ONLY`;
-
-    request.input("OFFSET", sql.Int, offset);
-    request.input("PAGE_SIZE", sql.Int, validPageSize);
-
-    const result = await request.query(query);
-    const totalCount =
-      result.recordset.length > 0 ? result.recordset[0].TOTAL_COUNT : 0;
+    const formatted = files.map((f) => ({
+      FILE_ID: f.id,
+      id: f.id,
+      FILE_NAME: f.fileName,
+      fileName: f.fileName,
+      CREATED_ON: f.createdAt,
+      createdAt: f.createdAt,
+      REMARKS: f.remarks,
+      remarks: f.remarks,
+      NAME: f.createdBy
+        ? `${f.createdBy.firstName || ""} ${f.createdBy.lastName || ""}`.trim()
+        : "",
+      name: f.createdBy
+        ? `${f.createdBy.firstName || ""} ${f.createdBy.lastName || ""}`.trim()
+        : "",
+    }));
 
     return res.status(200).json({
+      success: true,
       totalCount,
-      data: result.recordset,
+      data: formatted,
+      recordset: formatted,
+      recordsets: [formatted],
     });
-  } catch (error) {
-    console.error("Error in fetching all files: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("Error in getFiles:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-//SEND FILE TO SOMEONE
-exports.sendFileTo = async (req, res, next) => {
+// 18. SEND FILE TO RECIPIENT
+exports.sendFileTo = async (req, res) => {
   const { id } = req.params;
-  const fileId = id;
-  const { pool } = req;
   const { sendTo } = req.body;
-  try {
-    console.log("sendTo: ", sendTo);
+  const organizationId = req.organizationId || res.locals.organizationId;
 
-    const insertIntoSignatureLogQuery = `
-      INSERT INTO tblSignatureLog (FILE_ID, EMPLOYEE_ID, STATUS)
-      VALUES (@FILE_ID, @EMPLOYEE_ID, 0)
-      `;
-    const result = await pool
-      .request()
-      .input("FILE_ID", sql.Int, fileId)
-      .input("EMPLOYEE_ID", sql.Int, sendTo)
-      .input("STATUS", sql.Int, 0)
-      .query(insertIntoSignatureLogQuery);
-    return res.status(200).json({ message: "File sent to " + sendTo });
-  } catch (error) {
-    console.log("error in sending file to: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+  if (!sendTo) {
+    return error(res, "Recipient ID (sendTo) is required", 400);
   }
 
-  return res.status(200).json({ message: "File signed!!" });
-};
-
-exports.justSignUpadte = async (req, res, next) => {
-  const { id } = req.params;
-  const fileId = id;
-  const { pool, updatedPdfBuffer, employeeId } = req;
   try {
-    const updateFileQuery = `
-       BEGIN TRANSACTION
-   UPDATE tblFile
-   SET
-   FILE_DATA = @FILE_DATA,
-   SIGNATURES_DONE = SIGNATURES_DONE + 1
-   SIGNED_BY_ALL = CASE
-   WHEN SIGNATURES_DONE = SIGNATURES_REQUIRED THEN 1
-   ELSE SIGNED_BY_ALL
-   END
-   FROM tblFile f
-   INNER JOIN tblVoucherType v
-   ON f.VOUCHER_ID = v.VOUCHER_ID
-   WHERE FILE_ID = @FILE_ID
-
-   SELECT SIGNED_BY_ALL FROM tblFile WHERE FILE_ID = @FILE_ID
-
-   COMMIT TRANSACTION
-    `;
-    const result = await pool
-      .request()
-      .input("FILE_ID", sql.Int, fileId)
-      .input("FILE_DATA", sql.VarBinary(sql.MAX), updatedPdfBuffer)
-      .query(updateFileQuery);
-    const isSignedByAll = result.recordset[1].SIGNED_BY_ALL;
-
-    const updateSignatureLogQuery = `
-    UPDATE tblSignatureLog
-    SET STATUS = 1
-    WHERE FILE_ID = @FILE_ID AND EMPLOYEE_ID = @EMPLOYEE_ID
-    `;
-    await pool
-      .request()
-      .input("FILE_ID", sql.Int, fileId)
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(updateSignatureLogQuery);
-
-    return res.status(200).json({
-      message: "Digital signature added and PDF updated successfully",
+    // Determine the next step order
+    const existingLogs = await prisma.signatureLog.count({
+      where: { fileId: id },
     });
-  } catch (error) {
-    console.log("error in just signing and updating: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+    const nextStep = existingLogs + 1;
+
+    await prisma.signatureLog.upsert({
+      where: {
+        fileId_stepOrder_employeeId: {
+          fileId: id,
+          stepOrder: nextStep,
+          employeeId: sendTo,
+        },
+      },
+      create: {
+        organizationId,
+        fileId: id,
+        stepOrder: nextStep,
+        employeeId: sendTo,
+        status: "PENDING",
+      },
+      update: {
+        status: "PENDING",
+      },
+    });
+
+    return success(res, { fileId: id, sendTo }, "File sent successfully to recipient");
+  } catch (err) {
+    console.error("Error in sendFileTo:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-exports.sendingFile = async (req, res, next) => {
-  const { id } = req.params;
-  const fileId = id;
-  const { sendTo } = req.body;
-  const { pool } = req;
+exports.sendingFile = exports.sendFileTo;
+
+// 19. GET SENT FILES WITH NEXT SIGNER STATUS
+exports.getSentFiles = async (req, res) => {
+  const employeeId = res.locals.id || req.employeeId;
+  const organizationId = req.organizationId || res.locals.organizationId;
+
   try {
-    const insertIntoSignatureLogQuery = `
-    INSERT INTO tblSignatureLog (FILE_ID, EMPLOYEE_ID, STATUS)
-    VALUES (@FILE_ID, @EMPLOYEE_ID, 0)
-    `;
-    const result = await pool
-      .request()
-      .input("FILE_ID", sql.Int, fileId)
-      .input("EMPLOYEE_ID", sql.Int, sendTo)
-      .input("STATUS", sql.Int, 0)
-      .query(insertIntoSignatureLogQuery);
+    // Find all files where the user signed
+    const mySignedLogs = await prisma.signatureLog.findMany({
+      where: {
+        employeeId,
+        status: "SIGNED",
+        organizationId: organizationId || undefined,
+      },
+      include: {
+        file: {
+          include: {
+            signatureLogs: {
+              where: {
+                employeeId: { not: employeeId },
+              },
+              include: { employee: true },
+              orderBy: { stepOrder: "asc" },
+            },
+          },
+        },
+      },
+    });
 
-    return res.status(200).json({ message: "File sent to " + sendTo });
-  } catch (error) {
-    console.log("error in sending file to: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
-};
+    const formatted = [];
+    mySignedLogs.forEach((log) => {
+      if (!log.file || log.file.deletedAt) return;
+      // Get the next signer in the ladder
+      const nextLog = log.file.signatureLogs[0];
+      if (nextLog) {
+        formatted.push({
+          FILE_ID: log.file.id,
+          id: log.file.id,
+          FILE_NAME: log.file.fileName,
+          fileName: log.file.fileName,
+          EMPLOYEE_ID: nextLog.employeeId,
+          employeeId: nextLog.employeeId,
+          EMPLOYEE_NAME: nextLog.employee
+            ? `${nextLog.employee.firstName || ""} ${nextLog.employee.lastName || ""}`.trim()
+            : "Colleague",
+          NextUserTime: nextLog.signedAt || nextLog.createdAt,
+          NextUserStatus: nextLog.status === "PENDING" ? 0 : nextLog.status === "SIGNED" ? 1 : 2,
+          NextUserStatusText:
+            nextLog.status === "PENDING"
+              ? "In Progress"
+              : nextLog.status === "SIGNED"
+              ? "Approved"
+              : "Declined",
+        });
+      }
+    });
 
-exports.getSentFiles = async (req, res, next) => {
-  const { employeeId, pool } = req;
-  try {
-    const query = `
-      DECLARE @UserAId INT = @EMPLOYEE_ID;
-
- 
-WITH UserAFiles AS (
-    SELECT FILE_ID, TIME_STAMP AS A_TIMESTAMP
-    FROM tblSignatureLog
-    WHERE EMPLOYEE_ID = @UserAId AND STATUS = 1
-),
-LaterUsers AS (
-    SELECT 
-        s.FILE_ID,
-        s.EMPLOYEE_ID,
-        s.TIME_STAMP,
-        u.A_TIMESTAMP,
-        ROW_NUMBER() OVER (
-            PARTITION BY s.FILE_ID
-            ORDER BY 
-                CASE WHEN s.TIME_STAMP IS NULL THEN 1 ELSE 0 END,  -- NULLs come last
-                s.TIME_STAMP
-        ) AS rn
-    FROM tblSignatureLog s
-    JOIN UserAFiles u
-        ON s.FILE_ID = u.FILE_ID
-    WHERE 
-        s.EMPLOYEE_ID <> @UserAId
-        AND (
-            s.TIME_STAMP > u.A_TIMESTAMP OR s.TIME_STAMP IS NULL
-        )
-),
-NextUserPerFile AS (
-    SELECT * 
-    FROM LaterUsers
-    WHERE rn = 1
-)
-SELECT 
-    nupf.FILE_ID,
-    f.FILE_NAME,
-    nupf.EMPLOYEE_ID,
-    e.FIRST_NAME + ' ' + e.LAST_NAME AS EMPLOYEE_NAME,
-    nupf.TIME_STAMP AS NextUserTime,
-    s.STATUS AS NextUserStatus,
-    CASE 
-        WHEN s.STATUS = 0 THEN 'In Progress'
-        WHEN s.STATUS = 1 THEN 'Approved'
-        WHEN s.STATUS = 2 THEN 'Declined'
-        ELSE 'Unknown'
-    END AS NextUserStatusText
-FROM NextUserPerFile nupf
-JOIN tblFile f ON nupf.FILE_ID = f.FILE_ID
-JOIN tblEmployee e ON nupf.EMPLOYEE_ID = e.EMPLOYEE_ID
-JOIN tblSignatureLog s 
-    ON s.FILE_ID = nupf.FILE_ID 
-    AND s.EMPLOYEE_ID = nupf.EMPLOYEE_ID
-    AND (
-        (s.TIME_STAMP = nupf.TIME_STAMP) 
-        OR (s.TIME_STAMP IS NULL AND nupf.TIME_STAMP IS NULL)
-    );
-    `;
-
-    const result = await pool
-      .request()
-      .input("EMPLOYEE_ID", sql.Int, employeeId)
-      .query(query);
-
-    return res.status(200).json(result);
-  } catch (error) {
-    console.error("Error in fetching next user signatures: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+    return success(res, formatted, "Sent files tracked successfully");
+  } catch (err) {
+    console.error("Error in getSentFiles:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
