@@ -15,9 +15,7 @@ const SearchBar = ({
     const fetchData = async () => {
       try {
         const response = await axios.get(endpoint);
-        console.log("res from approved files: ", response);
-        const fetchedData = response.data.recordsets[0];
-        console.log("fetcheddata: ", fetchedData);
+        const fetchedData = response.data.data || response.data.recordsets?.[0] || response.data || [];
         setLocalData(fetchedData);
 
         setData(fetchedData);

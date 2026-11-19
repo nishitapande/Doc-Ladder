@@ -44,7 +44,7 @@ const UploadFile = () => {
     const getDepartments = async () => {
       try {
         const res = await axios.get(`${baseURL}/departments/alldepartments`);
-        setDepartments(res.data.recordsets[0]);
+        setDepartments(res.data.data || res.data.recordsets?.[0] || res.data || []);
       } catch (error) {
         console.error(error);
       }
@@ -53,7 +53,7 @@ const UploadFile = () => {
     const getVouchers = async () => {
       try {
         const res = await axios.get(`${baseURL}/vouchers/getvouchers`);
-        setVouchers(res.data.recordsets[0]);
+        setVouchers(res.data.data || res.data.recordsets?.[0] || res.data || []);
       } catch (error) {
         console.error(error);
       }
@@ -62,8 +62,7 @@ const UploadFile = () => {
     const getManagers = async () => {
       try {
         const res = await axios.get(`${baseURL}/users/employeesname`);
-        console.log("res from managers: ", res);
-        setManagers(res.data.recordsets[0]);
+        setManagers(res.data.data || res.data.recordsets?.[0] || res.data || []);
       } catch (error) {
         console.error(error);
       }

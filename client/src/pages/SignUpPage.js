@@ -59,7 +59,7 @@ const SignUpPage = () => {
       const response = await axios.get(`${baseURL}/users/employeesname`, {
         credentials: "include",
       });
-      setManagers(response.data.recordsets[0]);
+      setManagers(response.data.data || response.data.recordsets?.[0] || response.data || []);
     } catch (error) {
       console.error("Error fetching managers:", error);
       setErrors((prevErrors) => ({
@@ -72,7 +72,7 @@ const SignUpPage = () => {
   const fetchDepartments = async () => {
     try {
       const response = await axios.get(`${baseURL}/departments/alldepartments`);
-      setDepartments(response.data.recordsets[0]);
+      setDepartments(response.data.data || response.data.recordsets?.[0] || response.data || []);
     } catch (error) {
       console.error("Error fetching departments:", error);
       setErrors((prevErrors) => ({

@@ -31,7 +31,7 @@ const CreateDepartment = () => {
           credentials: "include",
         });
         const data = await response.json();
-        setManagers(data.recordsets[0]);
+        setManagers(data.data || data.recordsets?.[0] || data || []);
       } catch (error) {
         console.log("Failed to get managers", error.message);
       }

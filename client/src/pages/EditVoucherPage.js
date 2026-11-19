@@ -34,9 +34,11 @@ const EditVoucherPage = () => {
         if (response.status !== 200) {
           throw new Error("Failed to fetch voucher");
         }
-        console.log("response from voucher: ", response);
-        setVoucherName(response.data.recordset[0].VOUCHER_NAME);
-        setSignaturesRequired(response.data.recordset[0].SIGNATURES_REQUIRED);
+        const voucher = response.data.data || response.data.recordset?.[0] || response.data;
+        if (voucher) {
+          setVoucherName(voucher.VOUCHER_NAME || voucher.voucherName || voucher.name || "");
+          setSignaturesRequired(voucher.SIGNATURES_REQUIRED || voucher.signaturesRequired || 1);
+        }
       } catch (error) {
         console.error("Error fetching voucher: ", error.message);
         setError("Failed to fetch voucher");
