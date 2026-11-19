@@ -27,7 +27,7 @@ const DocumentListPage = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(10);
-  const [createdBy, setCreatedBy] = useState(0);
+  const [createdBy, setCreatedBy] = useState("");
   const [employees, setEmployees] = useState([]);
 
   useEffect(() => {
@@ -118,8 +118,8 @@ const DocumentListPage = () => {
         >
           <InputLabel>Created By</InputLabel>
           <Select
-            value={createdBy}
-            onChange={(e) => setCreatedBy(parseInt(e.target.value))}
+            value={createdBy || ""}
+            onChange={(e) => setCreatedBy(e.target.value)}
             label="Created By"
           >
             <MenuItem value="">

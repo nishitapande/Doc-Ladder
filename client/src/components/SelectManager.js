@@ -61,7 +61,7 @@ const SelectManager = ({ open, handleClose, handleSubmit, managerData }) => {
   };
 
   const handleChange = (e) => {
-    setSelectedManagerId(parseInt(e.target.value));
+    setSelectedManagerId(e.target.value);
     setError(false);
   };
 

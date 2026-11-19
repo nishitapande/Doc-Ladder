@@ -111,11 +111,11 @@ const EditDepartmentPage = () => {
           <InputLabel>Head of Department</InputLabel>
           <Select
             label="Head of Department"
-            value={hodId}
-            onChange={(e) => setHodId(parseInt(e.target.value))}
+            value={hodId || ""}
+            onChange={(e) => setHodId(e.target.value)}
             required
           >
-            <MenuItem value={0}>Select Head of Department</MenuItem>
+            <MenuItem value="">Select Head of Department</MenuItem>
             {managers.map((manager) => (
               <MenuItem key={manager.EMPLOYEE_ID} value={manager.EMPLOYEE_ID}>
                 {manager.NAME}

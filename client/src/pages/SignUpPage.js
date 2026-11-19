@@ -34,8 +34,8 @@ const SignUpPage = () => {
   const [password, setPassword] = useState("");
   const [gender, setGender] = useState("");
   const [address, setAddress] = useState("");
-  const [managerId, setManagerId] = useState(0);
-  const [departmentId, setDepartmentId] = useState(0);
+  const [managerId, setManagerId] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
   const [departments, setDepartments] = useState([]);
   const [managers, setManagers] = useState([]);
   const [viewableDepartments, setViewableDepartments] = useState([]);
@@ -117,7 +117,7 @@ const SignUpPage = () => {
       isValid = false;
     }
 
-    if (departmentId === 0) {
+    if (!departmentId) {
       newErrors.departmentId = "Department selection is required";
       isValid = false;
     }
@@ -321,8 +321,8 @@ const SignUpPage = () => {
           <FormControl variant="outlined" fullWidth>
             <InputLabel>Manger</InputLabel>
             <Select
-              value={managerId}
-              onChange={(e) => setManagerId(parseInt(e.target.value))}
+              value={managerId || ""}
+              onChange={(e) => setManagerId(e.target.value)}
               label="Manager"
             >
               <MenuItem value="">
@@ -340,13 +340,13 @@ const SignUpPage = () => {
           <FormControl variant="outlined" fullWidth>
             <InputLabel>Department</InputLabel>
             <Select
-              value={departmentId}
-              onChange={(e) => setDepartmentId(parseInt(e.target.value))}
+              value={departmentId || ""}
+              onChange={(e) => setDepartmentId(e.target.value)}
               label="Department"
               error={!!errors.departmentId}
               variant="outlined"
             >
-              <MenuItem value={0}>
+              <MenuItem value="">
                 <em>Select Department</em>
               </MenuItem>
               {departments.map((department) => (
