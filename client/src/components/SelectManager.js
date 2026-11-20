@@ -34,7 +34,7 @@ const SelectManager = ({ open, handleClose, handleSubmit, managerData }) => {
     const getManagers = async () => {
       try {
         const result = await axios.get(`${baseURL}/users/employeesname`);
-        setManagers(result.data.recordsets[0]);
+        setManagers(result.data.data || result.data.recordsets?.[0] || result.data || []);
       } catch (error) {
         console.error("Error in fetching managers: ", error);
       }
@@ -61,7 +61,7 @@ const SelectManager = ({ open, handleClose, handleSubmit, managerData }) => {
   };
 
   const handleChange = (e) => {
-    setSelectedManagerId(parseInt(e.target.value));
+    setSelectedManagerId(e.target.value);
     setError(false);
   };
 

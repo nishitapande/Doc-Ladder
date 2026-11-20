@@ -41,9 +41,11 @@ const EditDepartmentPage = () => {
         const response = await axios.get(
           `${baseURL}/departments/getdepartment/${departmentId}`
         );
-        // console.log("department: ", response.data.recordset[0]);
-        setDepartmentName(response.data.recordset[0].DEPARTMENT_NAME);
-        setHodId(response.data.recordset[0].HOD_ID);
+        const dept = response.data.data || response.data.recordset?.[0] || response.data;
+        if (dept) {
+          setDepartmentName(dept.DEPARTMENT_NAME || dept.departmentName || dept.name || "");
+          setHodId(dept.HOD_ID || dept.hodId || "");
+        }
       } catch (error) {
         setError("Failed to fetch department details");
         console.error(error);
@@ -53,10 +55,7 @@ const EditDepartmentPage = () => {
     const getAllEmployees = async () => {
       try {
         const result = await axios.get(`${baseURL}/users/employeesname`);
-        //console log the result
-        console.log("managers: ", result);
-
-        setManagers(result.data.recordsets[0]);
+        setManagers(result.data.data || result.data.recordsets?.[0] || result.data || []);
       } catch (error) {
         setError("Failed to fetch employee names");
         console.error(error);
@@ -112,11 +111,11 @@ const EditDepartmentPage = () => {
           <InputLabel>Head of Department</InputLabel>
           <Select
             label="Head of Department"
-            value={hodId}
-            onChange={(e) => setHodId(parseInt(e.target.value))}
+            value={hodId || ""}
+            onChange={(e) => setHodId(e.target.value)}
             required
           >
-            <MenuItem value={0}>Select Head of Department</MenuItem>
+            <MenuItem value="">Select Head of Department</MenuItem>
             {managers.map((manager) => (
               <MenuItem key={manager.EMPLOYEE_ID} value={manager.EMPLOYEE_ID}>
                 {manager.NAME}

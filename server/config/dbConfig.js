@@ -1,28 +1,12 @@
-const sql = require("mssql");
-
-const sqlConfig = {
-  user: process.env.uid,
-  password: process.env.pwd,
-  server: process.env.Server,
-  port: 1433,
-  database: process.env.Database,
-  authentication: {
-    type: "default",
-  },
-  options: {
-    encrypt: true,
-  },
-};
+const prisma = require("./prisma");
 
 const connectDatabase = async () => {
   try {
-    // Establish a new connection
-    await sql.connect(sqlConfig);
-    console.log("Database connected successfully");
+    await prisma.$connect();
+    console.log("PostgreSQL database connected successfully via Prisma");
   } catch (err) {
     console.error("Database connection failed:", err);
-    throw err;
   }
 };
 
-module.exports = { sql, connectDatabase };
+module.exports = { prisma, connectDatabase };

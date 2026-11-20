@@ -1,117 +1,163 @@
-const { sql } = require("../config/dbConfig");
+const prisma = require("../config/prisma");
+const { success, error } = require("../utils/response");
 
-//GET ALL VOUCHERS
-exports.getAllVoucher = async (req, res, next) => {
+// Helper to format voucher object
+const formatVoucher = (v) => ({
+  id: v.id,
+  VOUCHER_ID: v.id,
+  voucherId: v.id,
+  name: v.name,
+  VOUCHER_NAME: v.name,
+  voucherName: v.name,
+  signaturesRequired: v.signaturesRequired,
+  SIGNATURES_REQUIRED: v.signaturesRequired,
+});
+
+// GET ALL VOUCHERS FOR ORGANIZATION
+exports.getAllVoucher = async (req, res) => {
+  const organizationId = req.organizationId || res.locals.organizationId;
   try {
-    const pool = await sql.connect();
-    const result = await pool
-      .request()
-      .query(
-        "SELECT VOUCHER_ID,VOUCHER_NAME,SIGNATURES_REQUIRED FROM tblVoucherType ORDER BY VOUCHER_NAME"
-      );
-    res.status(200).json(result);
-  } catch (error) {
-    return res.status(400).json({ error: "Internal server error" });
+    const vouchers = await prisma.voucherType.findMany({
+      where: {
+        organizationId: organizationId || undefined,
+        deletedAt: null,
+      },
+      orderBy: { name: "asc" },
+    });
+
+    return success(res, vouchers.map(formatVoucher), "Vouchers fetched successfully");
+  } catch (err) {
+    console.error("Error in getAllVoucher:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-exports.getVoucherById = async (req, res, next) => {
+// GET VOUCHER BY ID
+exports.getVoucherById = async (req, res) => {
   const { id } = req.params;
-  // console.log("id: ", id);
+  const organizationId = req.organizationId || res.locals.organizationId;
+
   try {
-    const pool = await sql.connect();
-    const result = await pool
-      .request()
-      .input("VOUCHER_ID", sql.Int, id)
-      .query(
-        "SELECT VOUCHER_ID,VOUCHER_NAME, SIGNATURES_REQUIRED FROM tblVoucherType WHERE VOUCHER_ID = @VOUCHER_ID"
-      );
-    if (result.recordset.length === 0) {
-      return res.status(404).json({ message: "Voucher not found" });
+    const voucher = await prisma.voucherType.findFirst({
+      where: {
+        id,
+        organizationId: organizationId || undefined,
+        deletedAt: null,
+      },
+    });
+
+    if (!voucher) {
+      return error(res, "Voucher not found", 404);
     }
-    res.status(200).json(result);
-  } catch (error) {
-    //CONSOLE THE ERROR
-    console.log("Error in getting voucher by id: ", error);
-    return res.status(400).json({ error: "Internal server error" });
+
+    return success(res, formatVoucher(voucher), "Voucher fetched successfully");
+  } catch (err) {
+    console.error("Error in getVoucherById:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-//CREATE NEW VOUCHER
-
-exports.createNewVoucher = async (req, res, next) => {
+// CREATE NEW VOUCHER
+exports.createNewVoucher = async (req, res) => {
+  const organizationId = req.organizationId || res.locals.organizationId;
   const { voucherName, signaturesRequired } = req.body;
+
   if (!voucherName) {
-    return res.status(400).json({ message: "Voucher name is required" });
+    return error(res, "Voucher name is required", 400);
   }
+
   try {
-    const pool = await sql.connect();
-    const checkResult = await pool
-      .request()
-      .input("VOUCHER_NAME", sql.NVarChar, voucherName)
-      .query(
-        `SELECT COUNT(*) AS COUNT FROM tblVoucherType WHERE VOUCHER_NAME = @VOUCHER_NAME`
-      );
-    if (checkResult.recordset[0].COUNT > 0) {
-      return res.status(400).json({ message: "Voucher name already exists" });
+    let targetOrgId = organizationId;
+    if (!targetOrgId) {
+      const defaultOrg = await prisma.organization.findFirst();
+      targetOrgId = defaultOrg?.id;
     }
-    await pool
-      .request()
-      .input("VOUCHER_NAME", sql.NVarChar, voucherName)
-      .input("SIGNATURES_REQUIRED", sql.Int, signaturesRequired || 2)
-      .query(
-        `INSERT INTO tblVoucherType(VOUCHER_NAME,SIGNATURES_REQUIRED) VALUES(@VOUCHER_NAME,@SIGNATURES_REQUIRED) `
-      );
-    return res.status(200).json({ message: "Voucher added!!" });
-  } catch (error) {
-    return res.status(400).json({ error: "Internal server error" });
+
+    const newVoucher = await prisma.voucherType.create({
+      data: {
+        organizationId: targetOrgId,
+        name: voucherName.trim(),
+        signaturesRequired: parseInt(signaturesRequired, 10) || 1,
+      },
+    });
+
+    return success(res, formatVoucher(newVoucher), "Voucher added successfully", 201);
+  } catch (err) {
+    console.error("Error in createNewVoucher:", err);
+    if (err.code === "P2002") {
+      return error(res, "A voucher with this name already exists", 400);
+    }
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-//DELETE A VOUCHER
-
-exports.deleteVoucher = async (req, res, next) => {
-  const { id } = req.params;
-  try {
-    const pool = await sql.connect();
-    const result = await pool
-      .request()
-      .input("VOUCHER_ID", sql.Int, id)
-      .query("DELETE FROM tblVoucherType WHERE VOUCHER_ID = @VOUCHER_ID");
-    if (!result) {
-      return res.status(404).json({ message: "Voucher not found" });
-    }
-    res.status(200).json({ message: "Voucher deleted successfully" });
-  } catch (error) {
-    console.log("Error in deleting voucher: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
-};
-
-//UPDATE A VOUCHER
-
-exports.updateVoucher = async (req, res, next) => {
+// UPDATE A VOUCHER
+exports.updateVoucher = async (req, res) => {
   const { id } = req.params;
   const { voucherName, signaturesRequired } = req.body;
+  const organizationId = req.organizationId || res.locals.organizationId;
+
   try {
-    const pool = await sql.connect();
-    const result = await pool
-      .request()
-      .input("VOUCHER_ID", sql.Int, id)
-      .input("VOUCHER_NAME", sql.NVarChar, voucherName)
-      .input("SIGNATURES_REQUIRED", sql.Int, signaturesRequired)
-      .query(
-        `UPDATE tblVoucherType 
-        SET VOUCHER_NAME = @VOUCHER_NAME, 
-        SIGNATURES_REQUIRED = @SIGNATURES_REQUIRED 
-        WHERE VOUCHER_ID = @VOUCHER_ID`
-      );
-    if (!result) {
-      return res.status(404).json({ message: "Voucher not found" });
+    const updated = await prisma.voucherType.updateMany({
+      where: {
+        id,
+        organizationId: organizationId || undefined,
+      },
+      data: {
+        name: voucherName ? voucherName.trim() : undefined,
+        signaturesRequired:
+          signaturesRequired !== undefined
+            ? parseInt(signaturesRequired, 10)
+            : undefined,
+      },
+    });
+
+    if (updated.count === 0) {
+      return error(res, "Voucher not found", 404);
     }
-    res.status(200).json({ message: "Voucher updated successfully" });
-  } catch (error) {
-    console.log("Error in updating voucher: ", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+
+    return success(res, null, "Voucher updated successfully");
+  } catch (err) {
+    console.error("Error in updateVoucher:", err);
+    return error(res, "Internal Server Error", 500);
+  }
+};
+
+// DELETE A VOUCHER
+exports.deleteVoucher = async (req, res) => {
+  const { id } = req.params;
+  const organizationId = req.organizationId || res.locals.organizationId;
+
+  try {
+    const fileCount = await prisma.file.count({
+      where: {
+        voucherTypeId: id,
+        deletedAt: null,
+      },
+    });
+
+    if (fileCount > 0) {
+      return error(
+        res,
+        `Cannot delete voucher: ${fileCount} active file(s) are associated with this voucher type.`,
+        400
+      );
+    }
+
+    const deleted = await prisma.voucherType.deleteMany({
+      where: {
+        id,
+        organizationId: organizationId || undefined,
+      },
+    });
+
+    if (deleted.count === 0) {
+      return error(res, "Voucher not found", 404);
+    }
+
+    return success(res, null, "Voucher deleted successfully");
+  } catch (err) {
+    console.error("Error in deleteVoucher:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };

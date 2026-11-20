@@ -25,12 +25,10 @@ export const AuthContextProvider = ({ children }) => {
         });
         // console.log("isvalid: ", isValid);
         if (isValid.status === 200) {
-          setUser(isValid.data.recordset[0]);
+          const userData = isValid.data.data || isValid.data.recordset?.[0] || isValid.data;
+          setUser(userData);
           setIsAuthenticated(true);
-          localStorage.setItem(
-            "user",
-            JSON.stringify(isValid.data.recordset[0])
-          );
+          localStorage.setItem("user", JSON.stringify(userData));
           localStorage.setItem("isAuthenticated", true);
         } else {
           setIsAuthenticated(false);

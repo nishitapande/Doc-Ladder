@@ -26,25 +26,40 @@ import AuthContext from "../Context";
 
 const UploadFile = () => {
   const { user } = useContext(AuthContext);
-  const departemntID = user.DEPARTMENT_ID;
+  const userDeptId = user?.DEPARTMENT_ID || user?.departmentId || "";
+  const userManagerId = user?.MANAGER_ID || user?.managerId || "";
+
   const [file, setFile] = useState(null);
   const [fileName, setFileName] = useState("");
   const [departments, setDepartments] = useState([]);
   const [vouchers, setVouchers] = useState([]);
-  const [voucherId, setVoucherId] = useState(0);
-  const [departemntId, setDepartmentId] = useState(departemntID);
+  const [voucherId, setVoucherId] = useState("");
+  const [departemntId, setDepartmentId] = useState(userDeptId);
   const [remarks, setRemarks] = useState("");
-  const [errors, setErrors] = useState("");
+  const [errors, setErrors] = useState({});
   const [fileUploadValue, setFileUploadValue] = useState(0);
-  const [sendToEmployeeId, setSendToEmployeeId] = useState(user.MANAGER_ID);
+  const [sendToEmployeeId, setSendToEmployeeId] = useState(userManagerId);
   const [openSelectManager, setOpenSelectManager] = useState(false);
   const [managers, setManagers] = useState([]);
+
+  useEffect(() => {
+    if (userDeptId && !departemntId) {
+      setDepartmentId(userDeptId);
+    }
+    if (userManagerId && !sendToEmployeeId) {
+      setSendToEmployeeId(userManagerId);
+    }
+  }, [userDeptId, userManagerId]);
 
   useEffect(() => {
     const getDepartments = async () => {
       try {
         const res = await axios.get(`${baseURL}/departments/alldepartments`);
-        setDepartments(res.data.recordsets[0]);
+        const depts = res.data.data || res.data.recordsets?.[0] || res.data || [];
+        setDepartments(depts);
+        if (!departemntId && depts.length > 0) {
+          setDepartmentId(userDeptId || depts[0].DEPARTMENT_ID || depts[0].id);
+        }
       } catch (error) {
         console.error(error);
       }
@@ -53,7 +68,7 @@ const UploadFile = () => {
     const getVouchers = async () => {
       try {
         const res = await axios.get(`${baseURL}/vouchers/getvouchers`);
-        setVouchers(res.data.recordsets[0]);
+        setVouchers(res.data.data || res.data.recordsets?.[0] || res.data || []);
       } catch (error) {
         console.error(error);
       }
@@ -62,8 +77,7 @@ const UploadFile = () => {
     const getManagers = async () => {
       try {
         const res = await axios.get(`${baseURL}/users/employeesname`);
-        console.log("res from managers: ", res);
-        setManagers(res.data.recordsets[0]);
+        setManagers(res.data.data || res.data.recordsets?.[0] || res.data || []);
       } catch (error) {
         console.error(error);
       }
@@ -72,18 +86,18 @@ const UploadFile = () => {
     getDepartments();
     getVouchers();
     getManagers();
-  }, []);
+  }, [userDeptId]);
 
   const validateForm = () => {
-    let errors = {};
-    if (!file) errors.file = "File is required";
-    if (!fileName) errors.fileName = "File name is required";
-    if (!departments.find((d) => d.DEPARTMENT_ID === departemntId))
-      errors.departmentId = "Invalid department";
-    if (!voucherId) errors.voucherId = "voucher is required";
-    if (fileUploadValue === 0) errors.fileUploadValue = "File is required";
-    setErrors(errors);
-    return Object.keys(errors).length === 0;
+    let errs = {};
+    if (!file) errs.file = "File is required";
+    if (!fileName) errs.fileName = "File name is required";
+    if (!departemntId) errs.departmentId = "Department is required";
+    if (!voucherId) errs.voucherId = "Voucher is required";
+    if (fileUploadValue === 0) errs.fileUploadValue = "Type of upload is required";
+    if (fileUploadValue === 3 && !sendToEmployeeId) errs.sendToEmployeeId = "Recipient manager is required";
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
   const uploadFileHandler = async (e) => {
@@ -96,8 +110,8 @@ const UploadFile = () => {
     formData.append("departmentId", departemntId);
     formData.append("voucherId", voucherId);
     formData.append("remarks", remarks);
-    formData.append("fileUploadValue", parseInt(fileUploadValue));
-    if (fileUploadValue === 3) {
+    formData.append("fileUploadValue", parseInt(fileUploadValue, 10));
+    if (fileUploadValue === 3 && sendToEmployeeId) {
       formData.append("sendFileTo", sendToEmployeeId);
     }
 
@@ -107,19 +121,21 @@ const UploadFile = () => {
           "Content-Type": "multipart/form-data",
         },
       });
-      if (res.status === 200) {
+      if (res.status === 200 || res.status === 201) {
         alert("File uploaded successfully");
         setFile(null);
         setFileName("");
-        setDepartmentId(departemntID);
-        setVoucherId(0);
+        setDepartmentId(userDeptId || "");
+        setVoucherId("");
         setRemarks("");
         setFileUploadValue(0);
-        setSendToEmployeeId(user.MANAGER_ID);
+        setSendToEmployeeId(userManagerId || "");
+        setErrors({});
       }
     } catch (error) {
       console.error(error);
-      alert("Failed to upload file");
+      const msg = error.response?.data?.message || error.response?.data?.error || "Failed to upload file";
+      alert("Failed to upload file: " + msg);
     }
   };
 
@@ -132,7 +148,7 @@ const UploadFile = () => {
   };
 
   const handleRadioChange = (e) => {
-    const value = parseInt(e.target.value);
+    const value = parseInt(e.target.value, 10);
     setFileUploadValue(value);
     if (value === 3) {
       setOpenSelectManager(true);
@@ -142,7 +158,7 @@ const UploadFile = () => {
   };
 
   const handleSelectManagerChange = (e) => {
-    setSendToEmployeeId(parseInt(e.target.value));
+    setSendToEmployeeId(e.target.value);
   };
   return (
     <div>
@@ -231,18 +247,20 @@ const UploadFile = () => {
               <FormControl
                 variant="outlined"
                 fullWidth
-                error={!!errors.departemntID}
+                error={!!errors.departmentId}
               >
                 <InputLabel>Department</InputLabel>
                 <Select
-                  value={departemntId}
-                  //   onChange={(e) => setDepartmentId(parseInt(e.target.value))}
+                  value={departemntId || ""}
+                  onChange={(e) => setDepartmentId(e.target.value)}
                   label="Department"
-                  disabled
                 >
+                  <MenuItem value="" disabled>
+                    Select a Department
+                  </MenuItem>
                   {departments.map((d) => (
-                    <MenuItem key={d.DEPARTMENT_ID} value={d.DEPARTMENT_ID}>
-                      {d.DEPARTMENT_NAME}
+                    <MenuItem key={d.DEPARTMENT_ID || d.id} value={d.DEPARTMENT_ID || d.id}>
+                      {d.DEPARTMENT_NAME || d.name}
                     </MenuItem>
                   ))}
                 </Select>
@@ -266,17 +284,17 @@ const UploadFile = () => {
               >
                 <InputLabel>Voucher Name</InputLabel>
                 <Select
-                  value={voucherId}
-                  onChange={(e) => setVoucherId(parseInt(e.target.value))}
-                  label="Voucher"
+                  value={voucherId || ""}
+                  onChange={(e) => setVoucherId(e.target.value)}
+                  label="Voucher Name"
                   required
                 >
                   <MenuItem value="" disabled>
                     Select a Voucher
                   </MenuItem>
                   {vouchers.map((v) => (
-                    <MenuItem key={v.VOUCHER_ID} value={v.VOUCHER_ID}>
-                      {v.VOUCHER_NAME}
+                    <MenuItem key={v.VOUCHER_ID || v.id} value={v.VOUCHER_ID || v.id}>
+                      {v.VOUCHER_NAME || v.name}
                     </MenuItem>
                   ))}
                 </Select>
@@ -354,13 +372,16 @@ const UploadFile = () => {
               >
                 <InputLabel>Send To</InputLabel>
                 <Select
-                  value={sendToEmployeeId}
+                  value={sendToEmployeeId || ""}
                   onChange={handleSelectManagerChange}
                   label="Send To"
                 >
+                  <MenuItem value="" disabled>
+                    Select a Recipient
+                  </MenuItem>
                   {managers.map((m) => (
-                    <MenuItem key={m.EMPLOYEE_ID} value={m.EMPLOYEE_ID}>
-                      {m.NAME}
+                    <MenuItem key={m.EMPLOYEE_ID || m.id} value={m.EMPLOYEE_ID || m.id}>
+                      {m.NAME || m.name}
                     </MenuItem>
                   ))}
                 </Select>

@@ -20,7 +20,7 @@ const CreateDepartment = () => {
   const { user, isAuthenticated } = useContext(AuthContext);
   const navigate = useNavigate();
   const [departmentName, setDepartmentName] = useState("");
-  const [hodId, setHodId] = useState(0);
+  const [hodId, setHodId] = useState("");
   const [managers, setManagers] = useState([]);
   const [errors, setErrors] = useState({ departmentName: "", hodId: "" });
 
@@ -31,7 +31,7 @@ const CreateDepartment = () => {
           credentials: "include",
         });
         const data = await response.json();
-        setManagers(data.recordsets[0]);
+        setManagers(data.data || data.recordsets?.[0] || data || []);
       } catch (error) {
         console.log("Failed to get managers", error.message);
       }
@@ -127,10 +127,10 @@ const CreateDepartment = () => {
           <Select
             label="Select HOD"
             required
-            value={hodId}
-            onChange={(e) => setHodId(parseInt(e.target.value))}
+            value={hodId || ""}
+            onChange={(e) => setHodId(e.target.value)}
           >
-            <MenuItem value={0}>Select Head of Department</MenuItem>
+            <MenuItem value="">Select Head of Department</MenuItem>
             {managers.map((manager) => (
               <MenuItem key={manager.EMPLOYEE_ID} value={manager.EMPLOYEE_ID}>
                 {manager.NAME}

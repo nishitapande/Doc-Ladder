@@ -27,7 +27,7 @@ const DocumentListPage = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(10);
-  const [createdBy, setCreatedBy] = useState(0);
+  const [createdBy, setCreatedBy] = useState("");
   const [employees, setEmployees] = useState([]);
 
   useEffect(() => {
@@ -45,7 +45,7 @@ const DocumentListPage = () => {
   const getAllEmployees = async () => {
     try {
       const result = await axios.get(`${baseURL}/users/employeesname`);
-      setEmployees(result.data.recordsets[0]);
+      setEmployees(result.data.data || result.data.recordsets?.[0] || result.data || []);
     } catch (error) {
       console.error(error);
     }
@@ -55,17 +55,17 @@ const DocumentListPage = () => {
     try {
       const response = await axios.get(`${baseURL}/files/getFiles`, {
         params: {
-          department_id: parseInt(id),
+          department_id: id,
           start_date: startDate || null,
           end_date: endDate || null,
-          created_by: createdBy || null,
-          page: parseInt(currentPage),
-          page_size: parseInt(pageSize),
+          created_by: createdBy && createdBy !== 0 ? createdBy : null,
+          page: parseInt(currentPage) || 1,
+          page_size: parseInt(pageSize) || 10,
         },
       });
 
-      setData(response.data.data);
-      setTotalCount(response.data.totalCount);
+      setData(response.data.data || []);
+      setTotalCount(response.data.totalCount || 0);
       setStartDate("");
       setEndDate("");
       setCreatedBy(0);
@@ -118,8 +118,8 @@ const DocumentListPage = () => {
         >
           <InputLabel>Created By</InputLabel>
           <Select
-            value={createdBy}
-            onChange={(e) => setCreatedBy(parseInt(e.target.value))}
+            value={createdBy || ""}
+            onChange={(e) => setCreatedBy(e.target.value)}
             label="Created By"
           >
             <MenuItem value="">

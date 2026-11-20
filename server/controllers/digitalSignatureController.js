@@ -1,94 +1,129 @@
-const { sql } = require("../config/dbConfig");
+const prisma = require("../config/prisma");
+const storageService = require("../services/storageService");
+const { success, error } = require("../utils/response");
 
-//GET DIGITAL SIGNATURE
-exports.getDigitalSignature = async (req, res, next) => {
-  const userId = res.locals.id;
+// GET CURRENT USER'S DIGITAL SIGNATURE IMAGE
+exports.getDigitalSignature = async (req, res) => {
+  const userId = res.locals.id || req.employeeId;
+
   if (!userId) {
-    return res
-      .status(401)
-      .json({ message: "Unauthorized - User Id not found" });
+    return error(res, "Unauthorized - User ID not found", 401);
   }
+
   try {
-    const pool = await sql.connect();
-    const result = await pool
-      .request()
-      .input("CREATED_BY", sql.Int, userId)
-      .query(
-        `SELECT FILE_DATA FROM tblDigitalSignature WHERE CREATED_BY = @CREATED_BY`
-      );
-    // if (result.recordedset.length === 0) {
-    //   return res.status(404).json({ message: "No digital signature found" });
-    // }
-    const file = result.recordset[0].FILE_DATA;
-    res.status(200).send(file);
-  } catch (error) {
-    console.log("Error in retrieving digital signature: ", error);
-    return res.status(500).json({ message: "Internal Server Error" });
+    const signature = await prisma.digitalSignature.findUnique({
+      where: { employeeId: userId },
+    });
+
+    if (!signature) {
+      return res.status(404).json({
+        success: false,
+        message: "No digital signature found for this user",
+      });
+    }
+
+    const buffer = await storageService.getFileBuffer(signature.storageKey);
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Content-Disposition", `inline; filename="${signature.fileName}"`);
+    return res.status(200).send(buffer);
+  } catch (err) {
+    console.error("Error retrieving digital signature:", err);
+    return error(res, "Failed to retrieve digital signature", 500);
   }
 };
 
-//POST DIGITAL SIGNATURE
-exports.addDigitalSignature = async (req, res, next) => {
-  const userId = res.locals.id;
-  const { fileName } = req.body;
+// ADD DIGITAL SIGNATURE
+exports.addDigitalSignature = async (req, res) => {
+  const userId = res.locals.id || req.employeeId;
+  const organizationId = req.organizationId || res.locals.organizationId;
   const file = req.file;
+  const fileName = req.body.fileName || file?.originalname || "signature.png";
 
   if (!userId) {
-    return res
-      .status(401)
-      .json({ message: "Unauthorized - User Id not found" });
+    return error(res, "Unauthorized - User ID not found", 401);
   }
-  if (!file) {
-    return res.status(400).json({ message: "No file uploaded" });
+
+  if (!file || !file.buffer) {
+    return error(res, "No signature file uploaded", 400);
   }
+
   try {
-    const pool = await sql.connect();
-    const result = await pool
-      .request()
-      .input("SIGNATURE_FILE_NAME", sql.NVarChar, fileName)
-      .input("FILE_DATA", sql.VarBinary, file.buffer)
-      .input("CREATED_BY", sql.Int, userId)
-      .query(
-        `INSERT INTO tblDigitalSignature (SIGNATURE_FILE_NAME,FILE_DATA, CREATED_BY) VALUES (@SIGNATURE_FILE_NAME,@FILE_DATA, @CREATED_BY)`
-      );
-    res.status(201).json({ message: "Digital signature added successfully" });
-  } catch (error) {
-    console.log("Error in");
+    const ext = file.mimetype === "image/jpeg" ? "jpg" : "png";
+    const storageKey = `signatures/${organizationId}/${userId}.${ext}`;
+
+    const uploaded = await storageService.uploadFile({
+      storageKey,
+      buffer: file.buffer,
+      mimeType: file.mimetype || "image/png",
+    });
+
+    const signature = await prisma.digitalSignature.upsert({
+      where: { employeeId: userId },
+      create: {
+        organizationId,
+        employeeId: userId,
+        fileName,
+        storageKey: uploaded.storageKey,
+        fileUrl: uploaded.fileUrl,
+      },
+      update: {
+        fileName,
+        storageKey: uploaded.storageKey,
+        fileUrl: uploaded.fileUrl,
+      },
+    });
+
+    return success(res, signature, "Digital signature added successfully", 201);
+  } catch (err) {
+    console.error("Error adding digital signature:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
 
-// PATCH DIGITAL SIGNATURE
-
-exports.editDigitalSignature = async (req, res, next) => {
-  const userId = res.locals.id;
-  const { fileName } = req.body;
+// EDIT DIGITAL SIGNATURE
+exports.editDigitalSignature = async (req, res) => {
+  const userId = res.locals.id || req.employeeId;
+  const organizationId = req.organizationId || res.locals.organizationId;
   const file = req.file;
+  const fileName = req.body.fileName || file?.originalname || "signature.png";
 
   if (!userId) {
-    return res
-      .status(401)
-      .json({ message: "Unauthorized - User Id not found" });
+    return error(res, "Unauthorized - User ID not found", 401);
   }
-  if (!fileName) {
-    return res.status(400).json({ message: "Filename is required" });
-  }
-  if (!file) {
-    return res.status(400).json({ message: "No file uploaded" });
+
+  if (!file || !file.buffer) {
+    return error(res, "No signature file uploaded", 400);
   }
 
   try {
-    const pool = await sql.connect();
-    const result = await pool
-      .request()
-      .input("SIGNATURE_FILE_NAME", sql.NVarChar, fileName)
-      .input("FILE_DATA", sql.VarBinary(sql.MAX), file.buffer)
-      .input("CREATED_BY", sql.Int, userId)
-      .query(
-        `UPDATE tblDigitalSignature SET SIGNATURE_FILE_NAME=@SIGNATURE_FILE_
-        , FILE_DATA=@FILE_DATA, UPDATED_BY=@UPDATED_BY WHERE CREATED_BY=@CREATED_BY`
-      );
-  } catch (error) {
-    console.log("Error in updating digital signature: ", error);
-    return res.status(500).json({ message: "Internal Server Error" });
+    const ext = file.mimetype === "image/jpeg" ? "jpg" : "png";
+    const storageKey = `signatures/${organizationId}/${userId}.${ext}`;
+
+    const uploaded = await storageService.uploadFile({
+      storageKey,
+      buffer: file.buffer,
+      mimeType: file.mimetype || "image/png",
+    });
+
+    const signature = await prisma.digitalSignature.upsert({
+      where: { employeeId: userId },
+      create: {
+        organizationId,
+        employeeId: userId,
+        fileName,
+        storageKey: uploaded.storageKey,
+        fileUrl: uploaded.fileUrl,
+      },
+      update: {
+        fileName,
+        storageKey: uploaded.storageKey,
+        fileUrl: uploaded.fileUrl,
+      },
+    });
+
+    return success(res, signature, "Digital signature updated successfully");
+  } catch (err) {
+    console.error("Error updating digital signature:", err);
+    return error(res, "Internal Server Error", 500);
   }
 };
